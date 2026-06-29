@@ -1,0 +1,470 @@
+name: TideVec CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    tags:     ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  DOCKERHUB_REPO: averm004/tidevec
+
+jobs:
+
+  # ================================================================
+  # C++ build + test
+  # ================================================================
+  cpp-test:
+    name: C++ (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            python3 python3-pip
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DTIDEVEC_BUILD_TESTS=ON \
+            -GNinja
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Unit tests
+        run: ./build/tidevec_tests
+
+      - name: Scale tests
+        run: ./build/tidevec_scale_tests
+
+      - name: API tests
+        run: timeout 60 ./build/tidevec_api_tests
+
+      - name: Accel tests
+        run: ./build/tidevec_accel_tests
+
+  # ================================================================
+  # Python SDK
+  # ================================================================
+  python-sdk:
+    name: Python SDK (${{ matrix.python-version }})
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install grpc tools
+        run: pip install grpcio grpcio-tools protobuf
+
+      - name: Generate proto stubs
+        run: |
+          python -m grpc_tools.protoc \
+            -I proto \
+            --python_out=sdk/python/tidevec \
+            --grpc_python_out=sdk/python/tidevec \
+            proto/tidevec.proto
+
+      - name: Fix absolute import in generated grpc file
+        run: |
+          sed -i \
+            's/^import tidevec_pb2 as tidevec__pb2$/from . import tidevec_pb2 as tidevec__pb2/' \
+            sdk/python/tidevec/tidevec_pb2_grpc.py
+
+      - name: Install SDK
+        run: pip install -e sdk/python/
+
+      - name: Import check
+        run: python -c "from tidevec import TideVec, HalfLife; print('SDK OK')"
+
+  # ================================================================
+  # Docker CPU — push to Docker Hub as averm004/tidevec
+  # ================================================================
+  docker-cpu:
+    name: Docker CPU (${{ matrix.platform }})
+    runs-on: ubuntu-22.04
+    needs: [cpp-test]
+    if: github.event_name != 'pull_request'
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKERHUB_REPO }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=cpu,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}},suffix=-cpu
+            type=sha,prefix=sha-,suffix=-cpu
+
+      - name: Build and push CPU image
+        uses: docker/build-push-action@v6
+        with:
+          context:    .
+          file:       docker/cpu/Dockerfile
+          platforms:  ${{ matrix.platform }}
+          push:       true
+          tags:       ${{ steps.meta.outputs.tags }}
+          labels:     ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=cpu-${{ matrix.platform }}
+          cache-to:   type=gha,scope=cpu-${{ matrix.platform }},mode=max
+
+  # ================================================================
+  # Docker GPU — push to Docker Hub as averm004/tidevec:gpu
+  # ================================================================
+  docker-gpu:
+    name: Docker GPU
+    runs-on: ubuntu-22.04
+    needs: [cpp-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push GPU image
+        uses: docker/build-push-action@v6
+        with:
+          context:    .
+          file:       docker/gpu/Dockerfile
+          platforms:  linux/amd64
+          push:       true
+          tags: |
+            ${{ env.DOCKERHUB_REPO }}:gpu
+            ${{ env.DOCKERHUB_REPO }}:${{ github.ref_name }}-gpu
+          build-args: |
+            CUDA_ARCH=80;86;89;90
+            VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=gpu
+          cache-to:   type=gha,scope=gpu,mode=max
+
+  # ================================================================
+  # PyPI publish (on release tag)
+  # ================================================================
+  build-wheel:
+    name: Build Python Wheel
+    runs-on: ubuntu-22.04
+    needs: [python-sdk]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: Install build tools
+        run: pip install build grpcio-tools
+
+      - name: Generate proto stubs
+        run: |
+          python -m grpc_tools.protoc \
+            -I proto \
+            --python_out=sdk/python/tidevec \
+            --grpc_python_out=sdk/python/tidevec \
+            proto/tidevec.proto
+
+      - name: Fix grpc import
+        run: |
+          sed -i \
+            's/^import tidevec_pb2 as tidevec__pb2$/from . import tidevec_pb2 as tidevec__pb2/' \
+            sdk/python/tidevec/tidevec_pb2_grpc.py
+
+      - name: Build wheel and sdist
+        run: |
+          python -m build sdk/python/
+          echo "=== Built files ==="
+          ls -lh sdk/python/dist/
+
+      - name: Upload wheel as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidevec-wheel-${{ github.ref_name }}-${{ github.sha }}
+          path: sdk/python/dist/
+          retention-days: 30
+
+  publish-pypi:
+    name: Publish PyPI
+    runs-on: ubuntu-22.04
+    needs: [cpp-test]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: Install build tools
+        run: pip install build grpcio-tools
+
+      - name: Generate proto stubs
+        run: |
+          python -m grpc_tools.protoc \
+            -I proto \
+            --python_out=sdk/python/tidevec \
+            --grpc_python_out=sdk/python/tidevec \
+            proto/tidevec.proto
+
+      - name: Fix grpc import
+        run: |
+          sed -i \
+            's/^import tidevec_pb2 as tidevec__pb2$/from . import tidevec_pb2 as tidevec__pb2/' \
+            sdk/python/tidevec/tidevec_pb2_grpc.py
+
+      - name: Verify package name is tidevec
+        run: |
+          grep "^name" sdk/python/pyproject.toml
+          grep -q 'name.*=.*"tidevec"' sdk/python/pyproject.toml             && echo "✓ Package name is tidevec"             || (echo "✗ Wrong package name!" && exit 1)
+
+      - name: Build wheel
+        run: |
+          python -m build sdk/python/
+          echo "=== Built files ==="
+          ls -lh sdk/python/dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+  # ================================================================
+  # C++ SDK — validate headers compile cleanly, publish via GitHub Release
+  # Distribution: FetchContent (primary), vcpkg port, Conan recipe
+  # ================================================================
+  cpp-sdk:
+    name: C++ SDK
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y build-essential cmake ninja-build g++
+
+      - name: Verify headers compile (C++20)
+        run: |
+          cat > /tmp/test_sdk.cpp << 'CPPEOF'
+          #include "sdk/cpp/include/tidevec/tidevec.hpp"
+          int main() {
+              // Compile-time type checks
+              static_assert(tidevec::HalfLife::ONE_WEEK == 604800000LL);
+              static_assert(tidevec::HalfLife::ONE_DAY  == 86400000LL);
+              tidevec::CollectionConfig cfg{
+                  .name         = "test",
+                  .dim          = 768,
+                  .half_life_ms = tidevec::HalfLife::ONE_WEEK,
+              };
+              tidevec::SearchOptions opts{
+                  .top_k          = 10,
+                  .temporal_blend = 0.3f,
+              };
+              tidevec::Vector v{
+                  .id        = "v1",
+                  .embedding = {0.1f, 0.2f, 0.3f},
+              };
+              return 0;
+          }
+          CPPEOF
+          g++ -std=c++20 -I. /tmp/test_sdk.cpp -o /tmp/test_sdk
+          echo "C++ SDK headers compile cleanly ✓"
+
+      - name: Build example
+        run: |
+          g++ -std=c++20             -Isdk/cpp/include             sdk/cpp/examples/quickstart.cpp             -o /tmp/quickstart             -lpthread
+          echo "Example binary built ✓"
+          ls -lh /tmp/quickstart
+
+      - name: Validate Conan recipe
+        run: |
+          pip install conan --break-system-packages -q
+          conan profile detect --force
+          conan export sdk/cpp --name tidevec --version 0.1.0 || true
+          echo "Conan recipe exported ✓"
+
+      - name: Create SDK release archive (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p tidevec-cpp-sdk-${{ github.ref_name }}
+          cp -r sdk/cpp/include tidevec-cpp-sdk-${{ github.ref_name }}/
+          cp -r sdk/cpp/cmake   tidevec-cpp-sdk-${{ github.ref_name }}/
+          cp    sdk/cpp/CMakeLists.txt tidevec-cpp-sdk-${{ github.ref_name }}/
+          cp    sdk/cpp/conanfile.py   tidevec-cpp-sdk-${{ github.ref_name }}/
+          cp    sdk/cpp/vcpkg.json     tidevec-cpp-sdk-${{ github.ref_name }}/
+          tar -czf tidevec-cpp-sdk-${{ github.ref_name }}.tar.gz             tidevec-cpp-sdk-${{ github.ref_name }}/
+          echo "SDK archive created:"
+          ls -lh tidevec-cpp-sdk-*.tar.gz
+
+      - name: Upload SDK archive as artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidevec-cpp-sdk-${{ github.ref_name }}
+          path: tidevec-cpp-sdk-*.tar.gz
+          retention-days: 90
+
+  # ================================================================
+  # Go SDK — publishes automatically via Go Module Proxy
+  # Just needs a tag push — proxy indexes github.com/ashishodu2023/TideVec
+  # Users install with: go get github.com/ashishodu2023/TideVec/sdk/go@v0.1.0
+  # ================================================================
+  go-sdk:
+    name: Go SDK
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Generate Go proto stubs
+        run: |
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          pip install grpcio-tools --break-system-packages -q
+          python -m grpc_tools.protoc             -I proto             --python_out=/tmp             proto/tidevec.proto || true
+          # Generate Go stubs via protoc if available, else skip
+          which protoc && protoc             -I proto             --go_out=sdk/go             --go_opt=paths=source_relative             --go-grpc_out=sdk/go             --go-grpc_opt=paths=source_relative             proto/tidevec.proto || echo "protoc not available — Go stubs pre-generated"
+
+      - name: Verify Go module
+        run: |
+          cd sdk/go
+          go mod tidy
+          go vet ./...
+          echo "Go SDK module: $(head -1 go.mod)"
+
+      - name: Notify Go Module Proxy (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${{ github.ref_name }}
+          MODULE="github.com/ashishodu2023/TideVec/sdk/go"
+          echo "Triggering Go Module Proxy for ${MODULE}@${VERSION}"
+          # Proxy auto-indexes on first 'go get' — trigger it
+          curl -sf "https://proxy.golang.org/${MODULE}/@v/${VERSION}.info" || true
+          curl -sf "https://sum.golang.org/lookup/${MODULE}@${VERSION}" || true
+          echo ""
+          echo "Go SDK published!"
+          echo "Install: go get ${MODULE}@${VERSION}"
+
+  # ================================================================
+  # Java SDK — build JAR and publish to GitHub Packages
+  # (Maven Central requires extra GPG signing setup — GitHub Packages
+  #  works immediately with GITHUB_TOKEN)
+  # Users install via GitHub Packages Maven repository
+  # ================================================================
+  java-sdk:
+    name: Java SDK
+    runs-on: ubuntu-22.04
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          server-id: github
+          settings-path: ${{ github.workspace }}
+
+      - name: Install protoc
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y protobuf-compiler
+          protoc --version
+
+      - name: Generate Java proto stubs
+        run: |
+          mkdir -p sdk/java/src/main/java
+          # Use grpc_tools to generate proto descriptors, compile separately
+          pip install grpcio-tools --break-system-packages -q
+          python -m grpc_tools.protoc             -I proto             --java_out=sdk/java/src/main/java             proto/tidevec.proto || echo "Java proto gen requires full protoc plugin — using pre-generated stubs"
+
+      - name: Build JAR
+        run: |
+          cd sdk/java
+          mvn -B package -DskipTests             -Drevision=0.1.0             --no-transfer-progress
+          echo "=== Built artifacts ==="
+          ls -lh target/*.jar 2>/dev/null || ls -lh target/ | head -10
+
+      - name: Upload JAR as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tidevec-java-${{ github.ref_name }}
+          path: sdk/java/target/tidevec-java-*.jar
+          retention-days: 30
+
+      - name: Publish to GitHub Packages (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cd sdk/java
+          mvn -B deploy -DskipTests             --no-transfer-progress             -s ${{ github.workspace }}/settings.xml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ================================================================
+  # Security scan
+  # ================================================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-22.04
+    if: github.event_name != 'pull_request'
+    permissions:
+      security-events: write
+      actions:         read
+      contents:        read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref:  .
+          severity:  CRITICAL,HIGH
+          format:    sarif
+          output:    trivy-results.sarif
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif

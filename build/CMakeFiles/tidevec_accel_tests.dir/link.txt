@@ -1,0 +1,1 @@
+/usr/bin/clang++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/tidevec_accel_tests.dir/tests/unit/test_accelerator.cpp.o -o tidevec_accel_tests

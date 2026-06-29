@@ -1,0 +1,262 @@
+syntax = "proto3";
+
+package tidevec.v1;
+
+option go_package   = "github.com/ashishodu2023/TideVec/sdk/go/tidevec;tidevec";
+option java_package = "io.tidevec";
+option java_outer_classname = "TideVecProto";
+option java_multiple_files  = true;
+
+// ================================================================
+// TideVec gRPC Service — single source of truth for all SDKs
+// Compiled to: C++ / Python / Go / Java
+// ================================================================
+
+service TideVec {
+  // ---- Collections ----
+  rpc CreateCollection  (CreateCollectionRequest)  returns (CreateCollectionResponse);
+  rpc DropCollection    (DropCollectionRequest)    returns (DropCollectionResponse);
+  rpc GetCollection     (GetCollectionRequest)     returns (GetCollectionResponse);
+  rpc ListCollections   (ListCollectionsRequest)   returns (ListCollectionsResponse);
+  rpc UpdateTemporal    (UpdateTemporalRequest)    returns (UpdateTemporalResponse);
+
+  // ---- Vectors ----
+  rpc Upsert            (UpsertRequest)            returns (UpsertResponse);
+  rpc Delete            (DeleteRequest)            returns (DeleteResponse);
+  rpc BatchUpsert       (stream UpsertRequest)     returns (UpsertResponse);  // client streaming
+
+  // ---- Search ----
+  rpc Search            (SearchRequest)            returns (SearchResponse);
+  rpc BatchSearch       (BatchSearchRequest)       returns (BatchSearchResponse);
+  rpc SearchStream      (SearchRequest)            returns (stream SearchResult);  // server streaming
+
+  // ---- Graph ----
+  rpc AddEdges          (AddEdgesRequest)          returns (AddEdgesResponse);
+
+  // ---- Health ----
+  rpc Health            (HealthRequest)            returns (HealthResponse);
+}
+
+// ================================================================
+// Core types
+// ================================================================
+
+enum Metric {
+  COSINE = 0;
+  L2     = 1;
+  DOT    = 2;
+}
+
+enum QueryMode {
+  VECTOR_ONLY          = 0;
+  CAUSAL_EXPAND        = 1;
+  CONTRADICTION_CHECK  = 2;
+  ENTITY_RESOLVE       = 3;
+}
+
+enum EdgeType {
+  CAUSES      = 0;
+  CONTRADICTS = 1;
+  UPDATES     = 2;
+  RELATED_TO  = 3;
+  ENTITY_OF   = 4;
+  SUPPORTS    = 5;
+}
+
+enum Device {
+  AUTO = 0;
+  CPU  = 1;
+  GPU  = 2;
+  TPU  = 3;
+}
+
+// ================================================================
+// Collection messages
+// ================================================================
+
+message TemporalConfig {
+  int64 half_life_ms        = 1;  // e.g. 86400000 = 1 day
+  float temporal_blend      = 2;  // 0.0–1.0 (0=pure vector, 1=pure time)
+  float staleness_threshold = 3;
+  float temporal_cutoff     = 4;
+}
+
+message AgentContext {
+  string agent_id                = 1;
+  int64  memory_ttl_seconds      = 2;
+  float  dedup_threshold         = 3;
+  repeated string cross_agent_readable = 4;
+  bool   enabled                 = 5;
+}
+
+message CollectionInfo {
+  string         name       = 1;
+  uint64         n_vectors  = 2;
+  uint32         n_shards   = 3;
+  uint32         dim        = 4;
+  string         index_type = 5;
+  Metric         metric     = 6;
+  TemporalConfig temporal   = 7;
+}
+
+message CreateCollectionRequest {
+  string         name         = 1;
+  uint32         dim          = 2;
+  string         index_type   = 3;  // "tvindex" | "flat"
+  Metric         metric       = 4;
+  uint32         n_shards     = 5;
+  uint32         n_replicas   = 6;
+  uint32         write_quorum = 7;
+  TemporalConfig temporal     = 8;
+  AgentContext   agent        = 9;
+}
+message CreateCollectionResponse { string name = 1; string status = 2; }
+
+message DropCollectionRequest  { string name = 1; }
+message DropCollectionResponse { string status = 1; }
+
+message GetCollectionRequest  { string name = 1; }
+message GetCollectionResponse { CollectionInfo info = 1; }
+
+message ListCollectionsRequest  {}
+message ListCollectionsResponse { repeated CollectionInfo collections = 1; }
+
+message UpdateTemporalRequest  { string name = 1; TemporalConfig config = 2; }
+message UpdateTemporalResponse { string status = 1; }
+
+// ================================================================
+// Vector messages
+// ================================================================
+
+message CausalEdge {
+  string   target_id  = 1;
+  EdgeType type       = 2;
+  float    weight     = 3;
+}
+
+message Vector {
+  string              id         = 1;
+  repeated float      embedding  = 2 [packed = true];
+  map<string, string> payload    = 3;
+  int64               created_at = 4;  // ms since epoch; 0 = server-assigned
+  int64               valid_from = 5;
+  int64               valid_until= 6;  // 0 = no expiry
+  int64               ttl_seconds= 7;  // convenience; overrides valid_until
+  repeated CausalEdge edges      = 8;
+}
+
+message UpsertRequest {
+  string          collection = 1;
+  repeated Vector vectors    = 2;
+}
+message UpsertResponse {
+  uint64          inserted   = 1;
+  repeated string ids        = 2;
+}
+
+message DeleteRequest  { string collection = 1; repeated string ids = 2; }
+message DeleteResponse { uint64 deleted = 1; }
+
+// ================================================================
+// Search messages
+// ================================================================
+
+message SearchOptions {
+  uint32    top_k                      = 1;
+  float     temporal_blend             = 2;
+  QueryMode mode                       = 3;
+  uint32    causal_hops                = 4;
+  string    filter                     = 5;   // "key=value"
+  Metric    metric                     = 6;
+  bool      include_trace              = 7;
+  bool      include_staleness_warnings = 8;
+  uint32    ef_search                  = 9;
+  Device    device_hint                = 10;
+}
+
+message StalenessWarning {
+  string id              = 1;
+  int64  age_days        = 2;
+  float  temporal_score  = 3;
+  string reason          = 4;
+}
+
+message ContradictionAlert {
+  string result_id       = 1;
+  string contradicted_by = 2;
+  float  edge_weight     = 3;
+}
+
+message RetrievalTrace {
+  string   query_id              = 1;
+  string   strategy              = 2;
+  string   collection_name       = 3;
+  uint32   ef_search             = 4;
+  uint64   distance_computations = 5;
+  float    estimated_recall      = 6;
+  float    avg_temporal_score    = 7;
+  double   latency_ms            = 8;
+  repeated StalenessWarning    staleness_warnings   = 9;
+  repeated ContradictionAlert  contradiction_alerts = 10;
+  string   otel_trace_id        = 11;
+}
+
+message SearchResult {
+  string              id               = 1;
+  float               score            = 2;
+  float               vector_score     = 3;
+  float               temporal_score   = 4;
+  map<string, string> payload          = 5;
+  int64               created_at       = 6;
+  bool                staleness_warning= 7;
+  string              staleness_reason = 8;
+  repeated string     causal_neighbors = 9;
+  repeated string     contradicted_by  = 10;
+}
+
+message SearchRequest {
+  string              collection = 1;
+  repeated float      vector     = 2 [packed = true];
+  SearchOptions       options    = 3;
+}
+message SearchResponse {
+  repeated SearchResult results = 1;
+  uint64                count   = 2;
+  RetrievalTrace        trace   = 3;  // only if include_trace=true
+}
+
+message BatchSearchRequest {
+  string               collection = 1;
+  repeated SearchRequest queries  = 2;
+}
+message BatchSearchResponse {
+  repeated SearchResponse responses = 1;
+}
+
+// ================================================================
+// Graph messages
+// ================================================================
+
+message Edge {
+  string   src    = 1;
+  string   tgt    = 2;
+  EdgeType type   = 3;
+  float    weight = 4;
+}
+
+message AddEdgesRequest  { string collection = 1; repeated Edge edges = 2; }
+message AddEdgesResponse { uint64 added = 1; }
+
+// ================================================================
+// Health
+// ================================================================
+
+message HealthRequest {}
+message HealthResponse {
+  string status          = 1;
+  string version         = 2;
+  uint64 collections     = 3;
+  uint64 timestamp_ms    = 4;
+  bool   gpu_available   = 5;
+  bool   tpu_available   = 6;
+}

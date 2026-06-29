@@ -1,0 +1,1 @@
+/usr/bin/clang++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/tidevec_scale_tests.dir/tests/unit/test_scale_durability.cpp.o -o tidevec_scale_tests

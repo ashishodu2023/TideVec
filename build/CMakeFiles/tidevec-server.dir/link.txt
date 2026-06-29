@@ -1,0 +1,1 @@
+/usr/bin/clang++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names "CMakeFiles/tidevec-server.dir/src/api/server_main.cpp.o" -o tidevec-server

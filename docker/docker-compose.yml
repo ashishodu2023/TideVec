@@ -1,0 +1,134 @@
+# ================================================================
+# TideVec — Full stack docker-compose
+#
+# Services:
+#   tidevec      — TideVec server (CPU, default)
+#   tidevec-gpu  — TideVec server (GPU, --profile gpu)
+#   prometheus    — Metrics scraping
+#   grafana       — Dashboards (port 3000, admin/tidevec)
+#   jaeger        — Distributed tracing (port 16686)
+#
+# Usage:
+#   # CPU (default)
+#   docker compose up -d
+#
+#   # With GPU
+#   docker compose --profile gpu up -d
+#
+#   # Full observability stack
+#   docker compose --profile monitoring up -d
+# ================================================================
+
+services:
+
+  # ── TideVec CPU ────────────────────────────────────────────────
+  tidevec:
+    image: averm004/tidevec:latest
+    container_name: tidevec
+    restart: unless-stopped
+    ports:
+      - "6399:6399"   # REST API
+      - "6400:6400"   # gRPC
+    volumes:
+      - tidevec_data:/data
+    environment:
+      - TIDEVEC_THREADS=8
+      - TIDEVEC_LOG_LEVEL=info
+      - TIDEVEC_API_KEY=${TIDEVEC_API_KEY:-}
+    command:
+      - "--host=0.0.0.0"
+      - "--port=6399"
+      - "--data-dir=/data"
+      - "--threads=8"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:6399/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks: [tidevec_net]
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "3" }
+
+  # ── TideVec GPU (optional) ─────────────────────────────────────
+  tidevec-gpu:
+    image: averm004/tidevec:gpu
+    container_name: tidevec-gpu
+    profiles: [gpu]
+    restart: unless-stopped
+    ports:
+      - "6401:6399"
+      - "6402:6400"
+    volumes:
+      - tidevec_gpu_data:/data
+    environment:
+      - TIDEVEC_THREADS=16
+      - TIDEVEC_DEVICE=gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks: [tidevec_net]
+
+  # ── Prometheus ──────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: tidevec-prometheus
+    profiles: [monitoring]
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+    networks: [tidevec_net]
+
+  # ── Grafana ─────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: tidevec-grafana
+    profiles: [monitoring]
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=tidevec
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    depends_on: [prometheus]
+    networks: [tidevec_net]
+
+  # ── Jaeger (OTel tracing) ────────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    container_name: tidevec-jaeger
+    profiles: [monitoring]
+    restart: unless-stopped
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks: [tidevec_net]
+
+volumes:
+  tidevec_data:
+  tidevec_gpu_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  tidevec_net:
+    driver: bridge
