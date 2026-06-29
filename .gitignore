@@ -1,0 +1,60 @@
+cd ~/tidevec
+
+cat > .gitignore << 'EOF'
+# Build artifacts
+build/
+build_check/
+cmake-build-*/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.exe
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+*.cmake
+!cmake/*.cmake
+!sdk/cpp/cmake/*.cmake.in
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+.eggs/
+*.whl
+
+# Go
+sdk/go/vendor/
+
+# Java
+sdk/java/target/
+*.class
+*.jar
+
+# Node / website
+node_modules/
+website/dist/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+EOF
+
+# Verify it landed correctly
+cat .gitignore
+wc -l .gitignore

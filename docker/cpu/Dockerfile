@@ -1,18 +1,18 @@
 # ================================================================
-# TideVec — CPU Image (Docker Hub: ashishodu2023/TideVec:cpu)
+# TideVec — CPU Image (Docker Hub: averm004/tidevec:cpu)
 #
 # Multi-arch: linux/amd64 · linux/arm64
 # Final size: ~45MB
 #
 # Pull:
-#   docker pull ashishodu2023/TideVec:latest
-#   docker pull ashishodu2023/TideVec:cpu
+#   docker pull averm004/tidevec:latest
+#   docker pull averm004/tidevec:cpu
 #
 # Run:
 #   docker run -d \
 #     -p 6399:6399 -p 6400:6400 \
 #     -v $(pwd)/data:/data \
-#     ashishodu2023/TideVec:latest
+#     averm004/tidevec:latest
 #
 # With custom config:
 #   docker run -d \
@@ -20,7 +20,7 @@
 #     -v $(pwd)/data:/data \
 #     -e TIDEVEC_THREADS=16 \
 #     -e TIDEVEC_API_KEY=mysecretkey \
-#     ashishodu2023/TideVec:latest
+#     averm004/tidevec:latest
 # ================================================================
 
 # ── Stage 1: Dependency cache ────────────────────────────────────
@@ -58,7 +58,7 @@ RUN cmake -B build \
     -DCMAKE_CXX_STANDARD=20 \
     -DCMAKE_CXX_COMPILER=g++-12 \
     -DTIDEVEC_BUILD_TESTS=OFF \
-    -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG -march=native" \
+    -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG" \
     -GNinja \
     && cmake --build build --target tidevec-server -j$(nproc) \
     && strip build/tidevec-server

@@ -281,7 +281,7 @@ jobs:
       - name: Verify headers compile (C++20)
         run: |
           cat > /tmp/test_sdk.cpp << 'CPPEOF'
-          #include "sdk/cpp/include/tidevec/tidevec.hpp"
+          #include "tidevec/tidevec.hpp"
           int main() {
               // Compile-time type checks
               static_assert(tidevec::HalfLife::ONE_WEEK == 604800000LL);
@@ -302,7 +302,7 @@ jobs:
               return 0;
           }
           CPPEOF
-          g++ -std=c++20 -I. /tmp/test_sdk.cpp -o /tmp/test_sdk
+          g++ -std=c++20 -I${{ github.workspace }}/sdk/cpp/include /tmp/test_sdk.cpp -o /tmp/test_sdk
           echo "C++ SDK headers compile cleanly ✓"
 
       - name: Build example
@@ -313,7 +313,7 @@ jobs:
 
       - name: Validate Conan recipe
         run: |
-          pip install conan --break-system-packages -q
+          pip install conan -q
           conan profile detect --force
           conan export sdk/cpp --name tidevec --version 0.1.0 || true
           echo "Conan recipe exported ✓"
@@ -352,13 +352,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.23'
 
       - name: Generate Go proto stubs
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-          pip install grpcio-tools --break-system-packages -q
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.2
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+          pip install grpcio-tools -q
           python -m grpc_tools.protoc             -I proto             --python_out=/tmp             proto/tidevec.proto || true
           # Generate Go stubs via protoc if available, else skip
           which protoc && protoc             -I proto             --go_out=sdk/go             --go_opt=paths=source_relative             --go-grpc_out=sdk/go             --go-grpc_opt=paths=source_relative             proto/tidevec.proto || echo "protoc not available — Go stubs pre-generated"
@@ -415,7 +415,7 @@ jobs:
         run: |
           mkdir -p sdk/java/src/main/java
           # Use grpc_tools to generate proto descriptors, compile separately
-          pip install grpcio-tools --break-system-packages -q
+          pip install grpcio-tools -q
           python -m grpc_tools.protoc             -I proto             --java_out=sdk/java/src/main/java             proto/tidevec.proto || echo "Java proto gen requires full protoc plugin — using pre-generated stubs"
 
       - name: Build JAR
