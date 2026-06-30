@@ -92,6 +92,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Binary
 COPY --from=builder /build/build/tidevec-server /usr/local/bin/tidevec-server
+COPY docker/cpu/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Data dir
 RUN mkdir -p /data && chown tidevec:tidevec /data
@@ -116,9 +118,4 @@ ENV TIDEVEC_THREADS=8
 ENV TIDEVEC_DEVICE=cpu
 ENV TIDEVEC_LOG_LEVEL=info
 
-ENTRYPOINT ["/usr/local/bin/tidevec-server"]
-CMD ["--host",     "${TIDEVEC_HOST}", \
-     "--port",     "${TIDEVEC_PORT}", \
-     "--data-dir", "${TIDEVEC_DATA_DIR}", \
-     "--threads",  "${TIDEVEC_THREADS}", \
-     "--device",   "${TIDEVEC_DEVICE}"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

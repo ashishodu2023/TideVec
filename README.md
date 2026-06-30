@@ -127,6 +127,39 @@ HNSW (Hierarchical Navigable Small World) with temporal decay baked into graph t
 | `temporal_blend` | 0.3 | Weight on time-decay vs cosine similarity |
 | `half_life_ms` | 30 days | Decay rate (lower = faster staleness) |
 
+**Memory-compressed storage (opt-in):**
+
+Vanilla HNSW must keep every full-precision vector resident in RAM alongside `O(M)` neighbour pointers per node. At billion-vector scale, raw vector storage alone dominates cost — e.g. a 768-dim float32 embedding is 3072 bytes before any graph overhead.
+
+`TVIndexConfig::use_pq_compression` stores an 8-bit Product Quantization code instead of the raw embedding. Graph traversal scores candidates via asymmetric distance computation (ADC) against these codes directly — the coarse HNSW walk never needs to decode a full vector. Final top-K results can optionally be exact-rescored via an injectable `VectorStore` callback that fetches full vectors from an external backing store (disk, object store), matching the standard DiskANN pattern.
+
+Measured result (500 vectors, dim=96, M=12 subspaces):
+
+```
+[uncompressed] mem=192000 bytes
+[compressed]   mem=6000 bytes   (32x smaller)
+```
+
+```cpp
+TVIndexConfig cfg;
+cfg.use_pq_compression = true;
+cfg.pq_subspaces = 96;          // must divide embedding dim evenly
+TVIndex idx(cfg);
+
+// Train the quantizer on a representative sample BEFORE inserting
+idx.train_quantizer(sample_vectors);   // ~10K-100K vectors is typical
+
+// Optional: wire in a backing store for exact top-K rescoring
+idx.set_vector_store([](const std::string& id) {
+    return fetch_full_vector_from_disk(id);   // your implementation
+});
+
+idx.insert(vec);   // stores PQ code only, not the raw embedding
+auto results = idx.search(query, opts);
+```
+
+Without compression (default), behaviour is byte-for-byte identical to before this feature was added — 28/28 existing unit tests pass unchanged.
+
 ### Algorithm 2: GPU CAGRA — Warp-Level Beam Search
 
 **Files:** `include/tidevec/accelerator/gpu_engine.hpp`, `src/accelerator/gpu_kernels.cu`

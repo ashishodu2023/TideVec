@@ -26,24 +26,41 @@ static void signal_handler(int) {
 
 int main(int argc, char* argv[]) {
     tidevec::RestServer::Config cfg;
+    std::string device = "cpu";  // accepted for forward-compat, not yet dispatched
+
+    auto parse_int = [](const std::string& flag, const std::string& val) -> int {
+        try {
+            return std::stoi(val);
+        } catch (const std::exception&) {
+            std::cerr << "Error: " << flag << " expects an integer, got: \""
+                      << val << "\"\n";
+            std::exit(1);
+        }
+    };
 
     // Parse CLI args
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        auto next = [&]() -> std::string {
-            if (i + 1 < argc) return argv[++i];
-            throw std::runtime_error("Missing value for " + arg);
-        };
-        if      (arg == "--host")     cfg.host     = next();
-        else if (arg == "--port")     cfg.port     = std::stoi(next());
-        else if (arg == "--threads")  cfg.threads  = std::stoi(next());
-        else if (arg == "--data-dir") cfg.data_dir = next();
-        else if (arg == "--api-key")  cfg.api_key  = next();
-        else if (arg == "--quiet")    cfg.log_requests = false;
-        else {
-            std::cerr << "Unknown argument: " << arg << "\n";
-            return 1;
+    try {
+        for (int i = 1; i < argc; ++i) {
+            std::string arg = argv[i];
+            auto next = [&]() -> std::string {
+                if (i + 1 < argc) return argv[++i];
+                throw std::runtime_error("Missing value for " + arg);
+            };
+            if      (arg == "--host")     cfg.host     = next();
+            else if (arg == "--port")     cfg.port     = parse_int(arg, next());
+            else if (arg == "--threads")  cfg.threads  = parse_int(arg, next());
+            else if (arg == "--data-dir") cfg.data_dir = next();
+            else if (arg == "--api-key")  cfg.api_key  = next();
+            else if (arg == "--device")   device       = next();
+            else if (arg == "--quiet")    cfg.log_requests = false;
+            else {
+                std::cerr << "Unknown argument: " << arg << "\n";
+                return 1;
+            }
         }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
     }
 
     std::signal(SIGINT,  signal_handler);

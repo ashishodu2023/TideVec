@@ -21,6 +21,7 @@
 
 // ---- minimal test harness ----------------------------------------
 static int tests_run = 0, tests_passed = 0;
+static bool g_current_test_failed = false;
 
 #define TEST(name) \
     void test_##name(); \
@@ -30,6 +31,7 @@ static int tests_run = 0, tests_passed = 0;
 #define ASSERT(cond) do { \
     if (!(cond)) { \
         std::cerr << "  FAIL: " << #cond << " at line " << __LINE__ << "\n"; \
+        g_current_test_failed = true; \
         return; \
     } \
 } while(0)
@@ -39,9 +41,14 @@ static int tests_run = 0, tests_passed = 0;
 static void run_test(const char* name, void(*fn)()) {
     ++tests_run;
     std::cout << "[TEST] " << name << " ... ";
+    g_current_test_failed = false;
     fn();
-    ++tests_passed;
-    std::cout << "PASS\n";
+    if (g_current_test_failed) {
+        std::cout << "FAILED\n";
+    } else {
+        ++tests_passed;
+        std::cout << "PASS\n";
+    }
 }
 
 using namespace tidevec;
@@ -272,6 +279,55 @@ TEST(tvindex_remove) {
     QueryOptions opts; opts.top_k = 5; opts.temporal_blend = 0.0f;
     auto res = idx.search({1.0f, 0.0f}, opts);
     for (const auto& r : res) ASSERT(r.id != "del");
+}
+
+TEST(tvindex_pq_compression_reduces_memory) {
+    TVIndexConfig cfg;
+    cfg.use_pq_compression = true;
+    cfg.pq_subspaces = 4;  // dim=8, 4 subspaces => 2 dims/subspace
+    TVIndex idx(cfg);
+
+    std::vector<std::vector<float>> samples;
+    for (int i = 0; i < 50; ++i)
+        samples.push_back({float(i)*0.1f, float(i)*0.2f, float(i)*0.3f,
+                            float(i)*0.4f, float(i)*0.5f, float(i)*0.6f,
+                            float(i)*0.7f, float(i)*0.8f});
+    idx.train_quantizer(samples);
+    ASSERT(idx.quantizer_ready());
+
+    for (int i = 0; i < 100; ++i) {
+        CortexVector v("vec_" + std::to_string(i),
+            {float(i)*0.1f, float(i)*0.2f, float(i)*0.3f, float(i)*0.4f,
+             float(i)*0.5f, float(i)*0.6f, float(i)*0.7f, float(i)*0.8f});
+        idx.insert(v);
+    }
+
+    ASSERT(idx.size() == 100);
+    std::size_t compressed = idx.embedding_memory_bytes();
+    std::size_t uncompressed_equiv = 100 * 8 * sizeof(float);  // 3200 bytes
+    // At dim=8 / 4 subspaces (1 byte/subspace) the achievable ratio is
+    // exactly 8x (32 bytes -> 4 bytes per vector). Real-world configs
+    // (e.g. 768-dim / 96 subspaces) achieve ~32x, as shown in README.
+    ASSERT(compressed < uncompressed_equiv / 5);  // expect >5x reduction
+
+    QueryOptions opts; opts.top_k = 5;
+    auto res = idx.search({1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f}, opts);
+    ASSERT(!res.empty());
+}
+
+TEST(tvindex_pq_uncompressed_default_unchanged) {
+    // Default config (no compression) must behave exactly as before —
+    // this is a regression guard for the PQ integration.
+    TVIndex idx;  // default TVIndexConfig: use_pq_compression == false
+    idx.insert(CortexVector("a", {1.0f, 0.0f}));
+    idx.insert(CortexVector("b", {0.0f, 1.0f}));
+
+    QueryOptions opts; opts.top_k = 5; opts.temporal_blend = 0.0f;
+    auto res = idx.search({1.0f, 0.0f}, opts);
+    ASSERT(!res.empty());
+    ASSERT(res[0].id == "a");
+    // Uncompressed nodes store full embeddings, so memory == raw float count
+    ASSERT(idx.embedding_memory_bytes() == 2 * 2 * sizeof(float));
 }
 
 // ==================================================================
