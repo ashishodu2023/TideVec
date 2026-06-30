@@ -1,6 +1,6 @@
 #pragma once
 // ================================================================
-// consensus/raft.hpp — Raft consensus for CortexDB
+// consensus/raft.hpp — Raft consensus for TideVec
 //
 // WHY RAFT over our current quorum-write ReplicaSet:
 //
@@ -42,11 +42,11 @@
 //      at least as up-to-date as the voter's log.
 //      Ensures committed entries are never lost.
 //
-// This file: in-process Raft for single-machine multi-shard CortexDB.
+// This file: in-process Raft for single-machine multi-shard TideVec.
 // Distributed Raft (gRPC transport) is in raft_grpc.hpp (v0.3).
 // ================================================================
 
-#include <cortexdb/core/cortex_vector.hpp>
+#include <tidevec/core/cortex_vector.hpp>
 
 #include <string>
 #include <vector>
@@ -64,7 +64,7 @@
 #include <queue>
 #include <iostream>
 
-namespace cortexdb {
+namespace tidevec {
 namespace consensus {
 
 // ================================================================
@@ -85,7 +85,7 @@ inline std::string role_str(RaftRole r) {
     }
 }
 
-// Log entry — maps to a CortexDB write operation
+// Log entry — maps to a TideVec write operation
 struct LogEntry {
     Term        term;
     Index       index;
@@ -637,4 +637,4 @@ private:
 };
 
 } // namespace consensus
-} // namespace cortexdb
+} // namespace tidevec

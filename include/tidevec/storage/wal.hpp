@@ -1,6 +1,6 @@
 #pragma once
 // ================================================================
-// WriteAheadLog — durability layer for CortexDB
+// WriteAheadLog — durability layer for TideVec
 //
 // Every mutating operation (upsert, delete, add_edge) is written
 // to the WAL BEFORE it touches the in-memory index.
@@ -12,7 +12,7 @@
 // full index snapshot.
 // ================================================================
 
-#include <cortexdb/core/cortex_vector.hpp>
+#include <tidevec/core/cortex_vector.hpp>
 
 #include <string>
 #include <fstream>
@@ -24,7 +24,7 @@
 #include <functional>
 #include <stdexcept>
 
-namespace cortexdb {
+namespace tidevec {
 namespace fs = std::filesystem;
 
 // ------ WAL record types ----------------------------------------
@@ -327,4 +327,4 @@ private:
     uint64_t            bytes_written_  = 0;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

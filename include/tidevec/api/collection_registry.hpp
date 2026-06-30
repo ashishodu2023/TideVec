@@ -7,7 +7,7 @@
 // Thread-safe: shared_mutex (many readers, exclusive writer).
 // ================================================================
 
-#include <cortexdb/cluster/durable_collection.hpp>
+#include <tidevec/cluster/durable_collection.hpp>
 
 #include <string>
 #include <memory>
@@ -16,7 +16,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace cortexdb {
+namespace tidevec {
 
 class CollectionRegistry {
 public:
@@ -28,7 +28,7 @@ public:
         std::size_t n_shards    = 4;
         int         n_replicas  = 1;
         int         write_quorum= 1;
-        std::string data_dir    = "./cortexdb_data";
+        std::string data_dir    = "./tidevec_data";
         TemporalConfig temporal;
     };
 
@@ -122,4 +122,4 @@ private:
     std::unordered_map<std::string, CreateParams> metadata_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

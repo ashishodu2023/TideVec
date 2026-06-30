@@ -16,8 +16,8 @@
 // Threading: OpenMP (#pragma omp parallel for) for batch queries
 // ================================================================
 
-#include <cortexdb/accelerator/device.hpp>
-#include <cortexdb/quantization/product_quantizer.hpp>
+#include <tidevec/accelerator/device.hpp>
+#include <tidevec/quantization/product_quantizer.hpp>
 
 #include <vector>
 #include <algorithm>
@@ -30,7 +30,7 @@
 #include <shared_mutex>
 #include <mutex>
 
-namespace cortexdb {
+namespace tidevec {
 namespace accel {
 
 // ================================================================
@@ -313,4 +313,4 @@ private:
 };
 
 } // namespace accel
-} // namespace cortexdb
+} // namespace tidevec

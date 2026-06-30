@@ -20,7 +20,7 @@
 //   - Execution: LocalClient::Execute → literals in/out
 //
 // COMPILATION:
-//   With XLA:    -DCORTEXDB_XLA_ENABLED, link against libxla_client
+//   With XLA:    -DTIDEVEC_XLA_ENABLED, link against libxla_client
 //   Without XLA: transparent CPU fallback
 //
 // TPU SEARCH ALGORITHM:
@@ -33,8 +33,8 @@
 //   3. Multi-chip (pod): scatter-gather across TPU chips
 // ================================================================
 
-#include <cortexdb/accelerator/device.hpp>
-#include <cortexdb/accelerator/cpu_engine.hpp>
+#include <tidevec/accelerator/device.hpp>
+#include <tidevec/accelerator/cpu_engine.hpp>
 
 #include <string>
 #include <vector>
@@ -46,7 +46,7 @@
 // ================================================================
 // XLA path — compiled when XLA client library available
 // ================================================================
-#ifdef CORTEXDB_XLA_ENABLED
+#ifdef TIDEVEC_XLA_ENABLED
 #include "xla/client/xla_builder.h"
 #include "xla/client/client_library.h"
 #include "xla/client/local_client.h"
@@ -54,7 +54,7 @@
 #include "xla/shape_util.h"
 #include "xla/statusor.h"
 
-namespace cortexdb {
+namespace tidevec {
 namespace accel {
 
 // ================================================================
@@ -184,7 +184,7 @@ private:
         if (compiled_computation_) return;
 
         // Build XLA computation: matmul + top_k
-        xla::XlaBuilder builder("cortexdb_search");
+        xla::XlaBuilder builder("tidevec_search");
 
         // Params: queries[n_q, dim], database[n_, dim]
         auto q  = xla::Parameter(&builder, 0,
@@ -219,13 +219,13 @@ private:
 };
 
 } // namespace accel
-} // namespace cortexdb
+} // namespace tidevec
 
 #else
 // ================================================================
 // NO XLA — CPU fallback stub with honest reporting
 // ================================================================
-namespace cortexdb {
+namespace tidevec {
 namespace accel {
 
 struct XlaStubConfig { int batch_size=256; bool bfloat16=true; int top_k_max=100; };
@@ -234,8 +234,8 @@ class XlaBatchMatmulEngine : public AnnEngine {
 public:
     using Config = XlaStubConfig;
     explicit XlaBatchMatmulEngine(Config = XlaStubConfig{}) : cpu_(true) {
-        std::cout << "[CortexDB] XLA/TPU not compiled in. "
-                  << "Rebuild with -DCORTEXDB_XLA_ENABLED to enable TPU.\n"
+        std::cout << "[TideVec] XLA/TPU not compiled in. "
+                  << "Rebuild with -DTIDEVEC_XLA_ENABLED to enable TPU.\n"
                   << "          Using CPU fallback.\n";
     }
 
@@ -252,7 +252,7 @@ public:
     DeviceInfo device_info() const override {
         DeviceInfo info;
         info.type      = DeviceType::TPU;
-        info.name      = "XLA/TPU stub (not compiled; -DCORTEXDB_XLA_ENABLED)";
+        info.name      = "XLA/TPU stub (not compiled; -DTIDEVEC_XLA_ENABLED)";
         info.available = false;
         return info;
     }
@@ -263,5 +263,5 @@ private:
 };
 
 } // namespace accel
-} // namespace cortexdb
-#endif // CORTEXDB_XLA_ENABLED
+} // namespace tidevec
+#endif // TIDEVEC_XLA_ENABLED

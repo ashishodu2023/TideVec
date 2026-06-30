@@ -19,8 +19,8 @@
 //   This matches Raft majority-commit semantics.
 // ================================================================
 
-#include <cortexdb/core/collection.hpp>
-#include <cortexdb/storage/wal.hpp>
+#include <tidevec/core/collection.hpp>
+#include <tidevec/storage/wal.hpp>
 
 #include <vector>
 #include <memory>
@@ -28,7 +28,7 @@
 #include <shared_mutex>
 #include <stdexcept>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ================================================================
 // ReplicaSet — wraps a primary + replica Collections
@@ -183,4 +183,4 @@ private:
     bool              is_degraded_ = false;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

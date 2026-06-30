@@ -40,7 +40,7 @@
 //   7. Update: metadata to point to new shard location
 // ================================================================
 
-#include <cortexdb/erasure/reed_solomon.hpp>
+#include <tidevec/erasure/reed_solomon.hpp>
 
 #include <string>
 #include <vector>
@@ -56,7 +56,7 @@
 #include <iomanip>
 #include <cmath>
 
-namespace cortexdb {
+namespace tidevec {
 namespace health {
 
 // ================================================================
@@ -253,22 +253,22 @@ public:
     std::string prometheus_metrics() const {
         auto rep = durability_report();
         std::ostringstream ss;
-        ss << "# HELP cortexdb_nodes_healthy Healthy storage nodes\n"
-           << "cortexdb_nodes_healthy " << rep.n_nodes_healthy << "\n"
-           << "# HELP cortexdb_nodes_failed Failed storage nodes\n"
-           << "cortexdb_nodes_failed " << rep.n_nodes_failed << "\n"
-           << "# HELP cortexdb_durability_nines Effective durability nines\n"
-           << "cortexdb_durability_nines " << rep.effective_nines << "\n"
-           << "# HELP cortexdb_p_data_loss_year Annual probability of data loss\n"
-           << "cortexdb_p_data_loss_year " << rep.p_loss_per_year << "\n"
-           << "# HELP cortexdb_shards_at_risk Segments with insufficient surviving shards\n"
-           << "cortexdb_shards_at_risk " << rep.shards_at_risk << "\n"
-           << "# HELP cortexdb_scrubs_completed Total background scrubs completed\n"
-           << "cortexdb_scrubs_completed " << scrubs_completed_.load() << "\n"
-           << "# HELP cortexdb_repairs_completed Total shard repairs completed\n"
-           << "cortexdb_repairs_completed " << repairs_completed_.load() << "\n"
-           << "# HELP cortexdb_total_failures Total node failures detected\n"
-           << "cortexdb_total_failures " << total_failures_.load() << "\n";
+        ss << "# HELP tidevec_nodes_healthy Healthy storage nodes\n"
+           << "tidevec_nodes_healthy " << rep.n_nodes_healthy << "\n"
+           << "# HELP tidevec_nodes_failed Failed storage nodes\n"
+           << "tidevec_nodes_failed " << rep.n_nodes_failed << "\n"
+           << "# HELP tidevec_durability_nines Effective durability nines\n"
+           << "tidevec_durability_nines " << rep.effective_nines << "\n"
+           << "# HELP tidevec_p_data_loss_year Annual probability of data loss\n"
+           << "tidevec_p_data_loss_year " << rep.p_loss_per_year << "\n"
+           << "# HELP tidevec_shards_at_risk Segments with insufficient surviving shards\n"
+           << "tidevec_shards_at_risk " << rep.shards_at_risk << "\n"
+           << "# HELP tidevec_scrubs_completed Total background scrubs completed\n"
+           << "tidevec_scrubs_completed " << scrubs_completed_.load() << "\n"
+           << "# HELP tidevec_repairs_completed Total shard repairs completed\n"
+           << "tidevec_repairs_completed " << repairs_completed_.load() << "\n"
+           << "# HELP tidevec_total_failures Total node failures detected\n"
+           << "tidevec_total_failures " << total_failures_.load() << "\n";
         return ss.str();
     }
 
@@ -460,4 +460,4 @@ private:
 };
 
 } // namespace health
-} // namespace cortexdb
+} // namespace tidevec

@@ -15,7 +15,7 @@
 // For distributed mode (v0.3), shards are remote gRPC nodes.
 // ================================================================
 
-#include <cortexdb/core/collection.hpp>
+#include <tidevec/core/collection.hpp>
 
 #include <string>
 #include <vector>
@@ -28,7 +28,7 @@
 #include <numeric>
 #include <shared_mutex>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ---- Consistent hash ring helper --------------------------------
 inline std::size_t hash_to_shard(const std::string& key, std::size_t n_shards) {
@@ -177,4 +177,4 @@ private:
     std::vector<std::unique_ptr<Collection>> shards_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

@@ -23,9 +23,9 @@
 //   - Telemetry: which device served each query
 // ================================================================
 
-#include <cortexdb/accelerator/gpu_engine.hpp>
-#include <cortexdb/accelerator/tpu_engine.hpp>
-#include <cortexdb/accelerator/cpu_engine.hpp>
+#include <tidevec/accelerator/gpu_engine.hpp>
+#include <tidevec/accelerator/tpu_engine.hpp>
+#include <tidevec/accelerator/cpu_engine.hpp>
 
 #include <string>
 #include <vector>
@@ -35,7 +35,7 @@
 #include <mutex>
 #include <iostream>
 
-namespace cortexdb {
+namespace tidevec {
 namespace accel {
 
 // ================================================================
@@ -49,7 +49,7 @@ struct SystemDevices {
     bool has_tpu = false;
 
     void print() const {
-        std::cout << "\n=== CortexDB Accelerator Devices ===\n";
+        std::cout << "\n=== TideVec Accelerator Devices ===\n";
         cpu.print();
         for (const auto& g : gpus) g.print();
         for (const auto& t : tpus) t.print();
@@ -65,7 +65,7 @@ inline SystemDevices discover_devices() {
     sys.cpu = cpu_engine.device_info();
     sys.cpu.available = true;
 
-#ifdef CORTEXDB_CUDA_ENABLED
+#ifdef TIDEVEC_CUDA_ENABLED
     // Enumerate CUDA GPUs
     int n_gpus = 0;
     cudaGetDeviceCount(&n_gpus);
@@ -80,12 +80,12 @@ inline SystemDevices discover_devices() {
     // Report GPU as unavailable
     DeviceInfo gpu_info;
     gpu_info.type = DeviceType::GPU;
-    gpu_info.name = "NVIDIA GPU (compile with -DCORTEXDB_CUDA_ENABLED)";
+    gpu_info.name = "NVIDIA GPU (compile with -DTIDEVEC_CUDA_ENABLED)";
     gpu_info.available = false;
     sys.gpus.push_back(gpu_info);
 #endif
 
-#ifdef CORTEXDB_XLA_ENABLED
+#ifdef TIDEVEC_XLA_ENABLED
     // XLA detects TPU vs GPU vs CPU automatically
     try {
         XlaBatchMatmulEngine tpu_engine;
@@ -97,7 +97,7 @@ inline SystemDevices discover_devices() {
 #else
     DeviceInfo tpu_info;
     tpu_info.type = DeviceType::TPU;
-    tpu_info.name = "Google XLA/TPU (compile with -DCORTEXDB_XLA_ENABLED)";
+    tpu_info.name = "Google XLA/TPU (compile with -DTIDEVEC_XLA_ENABLED)";
     tpu_info.available = false;
     sys.tpus.push_back(tpu_info);
 #endif
@@ -237,7 +237,7 @@ private:
         cpu_engine_ = std::make_unique<CpuFlatEngine>(true);
 
         // GPU engine (uses stubs if CUDA not available)
-#ifdef CORTEXDB_CUDA_ENABLED
+#ifdef TIDEVEC_CUDA_ENABLED
         if (!sys_.gpus.empty() && sys_.gpus[0].available) {
             try {
                 gpu_engine_ = std::make_unique<CagraStyleEngine>(
@@ -273,4 +273,4 @@ private:
 };
 
 } // namespace accel
-} // namespace cortexdb
+} // namespace tidevec

@@ -2,7 +2,7 @@
 // ================================================================
 // accelerator/device.hpp — Hardware capability detection
 //
-// CortexDB accelerator stack:
+// TideVec accelerator stack:
 //
 //   ┌─────────────────────────────────────────────────┐
 //   │           AcceleratorDispatcher                 │
@@ -15,15 +15,15 @@
 //
 // Design principle: ZERO hard deps on CUDA/XLA at compile time.
 // Each engine is compiled conditionally:
-//   -DCORTEXDB_CUDA_ENABLED   → link against libcuda, libcublas
-//   -DCORTEXDB_XLA_ENABLED    → link against libxla
+//   -DTIDEVEC_CUDA_ENABLED   → link against libcuda, libcublas
+//   -DTIDEVEC_XLA_ENABLED    → link against libxla
 // Without those flags: only CPU path compiles (always works).
 //
 // Runtime detection: even if compiled with CUDA support,
 // gracefully falls back to CPU if no GPU is found.
 // ================================================================
 
-#include <cortexdb/core/cortex_vector.hpp>
+#include <tidevec/core/cortex_vector.hpp>
 #include <string>
 #include <vector>
 #include <memory>
@@ -34,7 +34,7 @@
 #include <cmath>
 #include <immintrin.h>   // AVX2/AVX512 intrinsics
 
-namespace cortexdb {
+namespace tidevec {
 namespace accel {
 
 // ------ Device types ------------------------------------------
@@ -213,4 +213,4 @@ inline void batch_matmul_dot(
 } // namespace simd
 
 } // namespace accel
-} // namespace cortexdb
+} // namespace tidevec

@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ------------------------------------------------------------------
 // Distance / similarity functions
@@ -104,4 +104,4 @@ inline void normalise(std::vector<float>& v) {
     for (auto& x : v) x /= norm;
 }
 
-} // namespace cortexdb
+} // namespace tidevec

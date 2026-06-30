@@ -1,16 +1,16 @@
 #pragma once
 
-#include <cortexdb/core/cortex_vector.hpp>
-#include <cortexdb/core/temporal_scorer.hpp>
-#include <cortexdb/index/flat_index.hpp>
-#include <cortexdb/index/tv_index.hpp>
-#include <cortexdb/graph/causal_graph.hpp>
+#include <tidevec/core/cortex_vector.hpp>
+#include <tidevec/core/temporal_scorer.hpp>
+#include <tidevec/index/flat_index.hpp>
+#include <tidevec/index/tv_index.hpp>
+#include <tidevec/graph/causal_graph.hpp>
 
 #include <string>
 #include <memory>
 #include <stdexcept>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ------------------------------------------------------------------
 // IndexType — which ANN index backs this collection
@@ -32,7 +32,7 @@ struct AgentContext {
 };
 
 // ------------------------------------------------------------------
-// Collection — logical namespace in CortexDB
+// Collection — logical namespace in TideVec
 //
 // Owns:
 //   · An ANN index (FlatIndex or TVIndex)
@@ -155,4 +155,4 @@ private:
     std::unique_ptr<CausalGraph> graph_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

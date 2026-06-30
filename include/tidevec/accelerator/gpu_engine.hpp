@@ -24,8 +24,8 @@
 //   - CpuFallbackGpuEngine: stub when CUDA not available
 // ================================================================
 
-#include <cortexdb/accelerator/device.hpp>
-#include <cortexdb/accelerator/cpu_engine.hpp>
+#include <tidevec/accelerator/device.hpp>
+#include <tidevec/accelerator/cpu_engine.hpp>
 
 #include <string>
 #include <vector>
@@ -36,11 +36,11 @@
 // ================================================================
 // CUDA path — compiled only when CUDA is available
 // ================================================================
-#ifdef CORTEXDB_CUDA_ENABLED
+#ifdef TIDEVEC_CUDA_ENABLED
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 
-namespace cortexdb {
+namespace tidevec {
 namespace accel {
 
 // ------ CUDA error helpers ------------------------------------
@@ -403,13 +403,13 @@ private:
 };
 
 } // namespace accel
-} // namespace cortexdb
+} // namespace tidevec
 
 #else
 // ================================================================
 // NO CUDA — provide stubs that transparently fall back to CPU
 // ================================================================
-namespace cortexdb {
+namespace tidevec {
 namespace accel {
 
 // Detect GPU presence at runtime via system call
@@ -453,7 +453,7 @@ public:
     void reset() override { cpu_.reset(); }
     DeviceInfo device_info() const override {
         auto info = cpu_.device_info();
-        info.name = "CAGRA stub → " + info.name + " (compile with -DCORTEXDB_CUDA_ENABLED)";
+        info.name = "CAGRA stub → " + info.name + " (compile with -DTIDEVEC_CUDA_ENABLED)";
         return info;
     }
     DeviceType device_type() const override { return DeviceType::CPU; }
@@ -462,5 +462,5 @@ private:
 };
 
 } // namespace accel
-} // namespace cortexdb
-#endif // CORTEXDB_CUDA_ENABLED
+} // namespace tidevec
+#endif // TIDEVEC_CUDA_ENABLED

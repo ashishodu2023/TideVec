@@ -1,15 +1,15 @@
 #pragma once
 // ================================================================
-// json_serializers.hpp — CortexDB ↔ JSON conversion helpers
+// json_serializers.hpp — TideVec ↔ JSON conversion helpers
 // Uses nlohmann/json (single header, no external deps)
 // ================================================================
 
-#include <cortexdb/api/json.hpp>
-#include <cortexdb/core/cortex_vector.hpp>
-#include <cortexdb/core/collection.hpp>
-#include <cortexdb/observability/retrieval_trace.hpp>
+#include <tidevec/api/json.hpp>
+#include <tidevec/core/cortex_vector.hpp>
+#include <tidevec/core/collection.hpp>
+#include <tidevec/observability/retrieval_trace.hpp>
 
-namespace cortexdb {
+namespace tidevec {
 using json = nlohmann::json;
 
 // ------ EdgeType --------------------------------------------------
@@ -178,4 +178,4 @@ inline json err(const std::string& msg, int code = 400) {
     return {{"status","error"}, {"error", msg}, {"code", code}};
 }
 
-} // namespace cortexdb
+} // namespace tidevec

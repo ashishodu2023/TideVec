@@ -20,7 +20,7 @@
 // This file implements the storage layer only (no index logic).
 // ================================================================
 
-#include <cortexdb/core/cortex_vector.hpp>
+#include <tidevec/core/cortex_vector.hpp>
 
 #include <string>
 #include <vector>
@@ -37,7 +37,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-namespace cortexdb {
+namespace tidevec {
 namespace fs = std::filesystem;
 
 // ---- Segment file header (64 bytes) ----------------------------
@@ -330,4 +330,4 @@ private:
     std::unordered_set<std::string> deleted_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

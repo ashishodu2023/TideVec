@@ -1,6 +1,6 @@
 #pragma once
 // ================================================================
-// RestServer — CortexDB HTTP/1.1 REST API
+// RestServer — TideVec HTTP/1.1 REST API
 //
 // Endpoints:
 //
@@ -33,9 +33,9 @@
 //     GET  /v1/trace/{query_id}              retrieve stored trace
 // ================================================================
 
-#include <cortexdb/api/httplib.h>
-#include <cortexdb/api/json_serializers.hpp>
-#include <cortexdb/api/collection_registry.hpp>
+#include <tidevec/api/httplib.h>
+#include <tidevec/api/json_serializers.hpp>
+#include <tidevec/api/collection_registry.hpp>
 
 #include <string>
 #include <atomic>
@@ -45,7 +45,7 @@
 #include <sstream>
 #include <iostream>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ================================================================
 // Metrics — simple atomic counters for Prometheus endpoint
@@ -63,24 +63,24 @@ struct ServerMetrics {
         auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - start_time).count();
         std::ostringstream ss;
-        ss << "# HELP cortexdb_requests_total Total HTTP requests\n"
-           << "# TYPE cortexdb_requests_total counter\n"
-           << "cortexdb_requests_total " << requests_total.load() << "\n\n"
-           << "# HELP cortexdb_search_requests_total Search requests\n"
-           << "# TYPE cortexdb_search_requests_total counter\n"
-           << "cortexdb_search_requests_total " << search_requests.load() << "\n\n"
-           << "# HELP cortexdb_upsert_requests_total Upsert requests\n"
-           << "# TYPE cortexdb_upsert_requests_total counter\n"
-           << "cortexdb_upsert_requests_total " << upsert_requests.load() << "\n\n"
-           << "# HELP cortexdb_errors_total Total errors\n"
-           << "# TYPE cortexdb_errors_total counter\n"
-           << "cortexdb_errors_total " << errors_total.load() << "\n\n"
-           << "# HELP cortexdb_vectors_inserted_total Vectors upserted\n"
-           << "# TYPE cortexdb_vectors_inserted_total counter\n"
-           << "cortexdb_vectors_inserted_total " << vectors_inserted.load() << "\n\n"
-           << "# HELP cortexdb_uptime_seconds Server uptime\n"
-           << "# TYPE cortexdb_uptime_seconds gauge\n"
-           << "cortexdb_uptime_seconds " << uptime << "\n";
+        ss << "# HELP tidevec_requests_total Total HTTP requests\n"
+           << "# TYPE tidevec_requests_total counter\n"
+           << "tidevec_requests_total " << requests_total.load() << "\n\n"
+           << "# HELP tidevec_search_requests_total Search requests\n"
+           << "# TYPE tidevec_search_requests_total counter\n"
+           << "tidevec_search_requests_total " << search_requests.load() << "\n\n"
+           << "# HELP tidevec_upsert_requests_total Upsert requests\n"
+           << "# TYPE tidevec_upsert_requests_total counter\n"
+           << "tidevec_upsert_requests_total " << upsert_requests.load() << "\n\n"
+           << "# HELP tidevec_errors_total Total errors\n"
+           << "# TYPE tidevec_errors_total counter\n"
+           << "tidevec_errors_total " << errors_total.load() << "\n\n"
+           << "# HELP tidevec_vectors_inserted_total Vectors upserted\n"
+           << "# TYPE tidevec_vectors_inserted_total counter\n"
+           << "tidevec_vectors_inserted_total " << vectors_inserted.load() << "\n\n"
+           << "# HELP tidevec_uptime_seconds Server uptime\n"
+           << "# TYPE tidevec_uptime_seconds gauge\n"
+           << "tidevec_uptime_seconds " << uptime << "\n";
         return ss.str();
     }
 };
@@ -93,7 +93,7 @@ struct RestServerConfig {
     int         port         = 6399;
     int         threads      = 8;
     std::string api_key      = "";
-    std::string data_dir     = "./cortexdb_data";
+    std::string data_dir     = "./tidevec_data";
     bool        log_requests = true;
 };
 
@@ -111,7 +111,7 @@ public:
     // Blocking — call from main thread
     void listen() {
         std::cout << "\n╔══════════════════════════════════════╗\n";
-        std::cout << "║   CortexDB REST API v0.1.0           ║\n";
+        std::cout << "║   TideVec REST API v0.1.0           ║\n";
         std::cout << "║   http://" << cfg_.host << ":" << cfg_.port << "          ║\n";
         std::cout << "╚══════════════════════════════════════╝\n\n";
         std::cout << "Endpoints:\n";
@@ -194,7 +194,7 @@ private:
         svr_.Get("/v1/info", [this](const httplib::Request&, httplib::Response& res) {
             ++metrics_.requests_total;
             _json_response(res, {
-                {"name", "CortexDB"},
+                {"name", "TideVec"},
                 {"version", "0.1.0"},
                 {"description", "Temporally-aware causal vector database"},
                 {"features", json::array({"TVIndex", "CausalEdge",
@@ -478,4 +478,4 @@ private:
     httplib::Server     svr_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

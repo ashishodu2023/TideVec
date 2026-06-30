@@ -1,8 +1,8 @@
 #pragma once
 
-#include <cortexdb/core/cortex_vector.hpp>
-#include <cortexdb/core/metrics.hpp>
-#include <cortexdb/core/temporal_scorer.hpp>
+#include <tidevec/core/cortex_vector.hpp>
+#include <tidevec/core/metrics.hpp>
+#include <tidevec/core/temporal_scorer.hpp>
 
 #include <vector>
 #include <string>
@@ -17,7 +17,7 @@
 #include <functional>
 #include <mutex>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ------------------------------------------------------------------
 // TVIndex — Temporal Vector Index
@@ -363,4 +363,4 @@ private:
     mutable std::shared_mutex mutex_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

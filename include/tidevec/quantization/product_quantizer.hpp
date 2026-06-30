@@ -12,7 +12,7 @@
 //   · PQ codes used to rank candidates; top-K re-scored from SSD
 // ================================================================
 
-#include <cortexdb/core/metrics.hpp>
+#include <tidevec/core/metrics.hpp>
 
 #include <vector>
 #include <array>
@@ -25,7 +25,7 @@
 #include <algorithm>
 #include <numeric>
 
-namespace cortexdb {
+namespace tidevec {
 
 static constexpr int PQ_K = 256;  // 256 centroids → 1 byte per subspace
 
@@ -206,4 +206,4 @@ private:
     std::vector<std::vector<std::vector<float>>> codebooks_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

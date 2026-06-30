@@ -1,10 +1,10 @@
 #pragma once
 
-#include <cortexdb/core/cortex_vector.hpp>
+#include <tidevec/core/cortex_vector.hpp>
 #include <cmath>
 #include <stdexcept>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ------------------------------------------------------------------
 // TemporalConfig — per-collection decay settings
@@ -120,4 +120,4 @@ private:
     TemporalConfig cfg_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

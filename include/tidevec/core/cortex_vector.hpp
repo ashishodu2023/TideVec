@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ------------------------------------------------------------------
 // Timestamp — milliseconds since epoch
@@ -58,7 +58,7 @@ struct CausalEdge {
 };
 
 // ------------------------------------------------------------------
-// CortexVector — the core unit stored in CortexDB
+// CortexVector — the core unit stored in TideVec
 //
 // Extends a standard embedding vector with:
 //   · created_at  — insertion timestamp (TVIndex temporal scoring)
@@ -154,4 +154,4 @@ struct QueryOptions {
     int        ef_search        = 128;    // HNSW search width
 };
 
-} // namespace cortexdb
+} // namespace tidevec

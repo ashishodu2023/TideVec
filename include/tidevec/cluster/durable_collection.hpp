@@ -18,10 +18,10 @@
 //   QPS:      ~10K queries/sec at 10 shard nodes
 // ================================================================
 
-#include <cortexdb/cluster/shard_router.hpp>
-#include <cortexdb/cluster/replica_set.hpp>
-#include <cortexdb/storage/wal.hpp>
-#include <cortexdb/observability/retrieval_trace.hpp>
+#include <tidevec/cluster/shard_router.hpp>
+#include <tidevec/cluster/replica_set.hpp>
+#include <tidevec/storage/wal.hpp>
+#include <tidevec/observability/retrieval_trace.hpp>
 #include <iostream>
 
 #include <string>
@@ -30,7 +30,7 @@
 #include <atomic>
 #include <sstream>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ================================================================
 // DurableCollection
@@ -43,7 +43,7 @@ public:
         std::size_t n_shards         = 10;
         int         n_replicas       = 2;       // per shard
         int         write_quorum     = 2;
-        std::string data_dir         = "./cortexdb_data";
+        std::string data_dir         = "./tidevec_data";
         TemporalConfig temporal;
         TVIndexConfig  tvindex;
         bool parallel_search         = true;
@@ -206,4 +206,4 @@ private:
     std::atomic<uint64_t> total_queries_{0};
 };
 
-} // namespace cortexdb
+} // namespace tidevec

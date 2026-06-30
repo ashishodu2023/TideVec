@@ -1,12 +1,12 @@
 #pragma once
 
-#include <cortexdb/core/cortex_vector.hpp>
+#include <tidevec/core/cortex_vector.hpp>
 #include <string>
 #include <vector>
 #include <sstream>
 #include <iomanip>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ------------------------------------------------------------------
 // RetrievalTrace — emitted for every query when include_trace=true
@@ -110,4 +110,4 @@ struct RetrievalTrace {
     }
 };
 
-} // namespace cortexdb
+} // namespace tidevec

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cortexdb/core/cortex_vector.hpp>
+#include <tidevec/core/cortex_vector.hpp>
 #include <mutex>
 
 #include <string>
@@ -11,7 +11,7 @@
 #include <optional>
 #include <functional>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ------------------------------------------------------------------
 // CausalGraph — native directed typed-edge graph
@@ -177,4 +177,4 @@ private:
     mutable std::shared_mutex mutex_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

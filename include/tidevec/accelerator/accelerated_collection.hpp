@@ -23,16 +23,16 @@
 //   final_score = α·accel_similarity + β·temporal_weight(created_at)
 // ================================================================
 
-#include <cortexdb/cluster/durable_collection.hpp>
-#include <cortexdb/accelerator/dispatcher.hpp>
-#include <cortexdb/core/temporal_scorer.hpp>
+#include <tidevec/cluster/durable_collection.hpp>
+#include <tidevec/accelerator/dispatcher.hpp>
+#include <tidevec/core/temporal_scorer.hpp>
 
 #include <unordered_map>
 #include <vector>
 #include <string>
 #include <shared_mutex>
 
-namespace cortexdb {
+namespace tidevec {
 
 class AcceleratedCollection {
 public:
@@ -311,4 +311,4 @@ private:
     mutable std::shared_mutex meta_mutex_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

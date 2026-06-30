@@ -1,1 +1,0 @@
-/usr/bin/clang++ -g -arch arm64 -Wl,-search_paths_first -Wl,-headerpad_max_install_names CMakeFiles/tidevec_eleven_nines_tests.dir/tests/unit/test_eleven_nines.cpp.o -o tidevec_eleven_nines_tests

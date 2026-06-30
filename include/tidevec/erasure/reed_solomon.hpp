@@ -43,7 +43,7 @@
 #include <memory>
 #include <cmath>
 
-namespace cortexdb {
+namespace tidevec {
 namespace erasure {
 
 // ================================================================
@@ -364,4 +364,4 @@ inline uint64_t xxhash_simple(const uint8_t* data, std::size_t len) {
 }
 
 } // namespace erasure
-} // namespace cortexdb
+} // namespace tidevec

@@ -40,11 +40,11 @@
 //   With multiple AZs: 99.9999999% = 9 nines ✓
 // ================================================================
 
-#include <cortexdb/cluster/durable_collection.hpp>
-#include <cortexdb/consensus/raft.hpp>
-#include <cortexdb/erasure/reed_solomon.hpp>
-#include <cortexdb/health/health_monitor.hpp>
-#include <cortexdb/storage/wal.hpp>
+#include <tidevec/cluster/durable_collection.hpp>
+#include <tidevec/consensus/raft.hpp>
+#include <tidevec/erasure/reed_solomon.hpp>
+#include <tidevec/health/health_monitor.hpp>
+#include <tidevec/storage/wal.hpp>
 
 #include <string>
 #include <memory>
@@ -59,7 +59,7 @@
 #include <sstream>
 #include <iomanip>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ================================================================
 // WAL Group Commit — batch multiple writes into one fsync
@@ -204,7 +204,7 @@ public:
         TVIndexConfig  tvindex;
 
         // Storage
-        std::string data_dir = "./cortexdb_data";
+        std::string data_dir = "./tidevec_data";
     };
 
     explicit UltraDurableCollection(Config cfg)
@@ -327,8 +327,8 @@ public:
         if (health_) base = health_->prometheus_metrics();
         std::ostringstream ss;
         ss << base
-           << "cortexdb_total_writes "   << total_writes_.load()  << "\n"
-           << "cortexdb_total_queries "  << total_queries_.load() << "\n";
+           << "tidevec_total_writes "   << total_writes_.load()  << "\n"
+           << "tidevec_total_queries "  << total_queries_.load() << "\n";
         return ss.str();
     }
 
@@ -404,7 +404,7 @@ private:
         auto rep = durability_report();
         std::ostringstream ss;
         ss << "\n╔══════════════════════════════════════════════════════╗\n"
-           << "║   CortexDB Ultra-Durable Collection                  ║\n"
+           << "║   TideVec Ultra-Durable Collection                  ║\n"
            << "╠══════════════════════════════════════════════════════╣\n"
            << "║  Collection:    " << std::left << std::setw(38) << cfg_.name << "║\n"
            << "║  RS erasure:    RS(" << cfg_.rs_k << "," << cfg_.rs_m << ")"
@@ -440,4 +440,4 @@ private:
     std::atomic<uint64_t> total_queries_{0};
 };
 
-} // namespace cortexdb
+} // namespace tidevec
