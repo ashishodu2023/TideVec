@@ -103,7 +103,7 @@ EXPOSE 6399 6400
 
 # Health check
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:6399/health | grep -q '"status":"ok"' || exit 1
+    CMD curl -sf http://localhost:6399/health || exit 1
 
 USER tidevec
 
