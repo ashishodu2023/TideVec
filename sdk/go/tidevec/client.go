@@ -14,52 +14,29 @@
 //	    TemporalBlend: 0.3,
 //	})
 //
-//	err = db.Upsert(ctx, "docs", []tidevec.Vector{{
-//	    ID:        "v1",
-//	    Embedding: []float32{0.1, 0.2, ...},
-//	    Payload:   map[string]string{"src": "wiki"},
-//	}})
-//
-//	resp, err := db.Search(ctx, "docs", tidevec.SearchRequest{
-//	    Vector:        []float32{0.1, 0.2, ...},
-//	    TopK:          10,
-//	    TemporalBlend: 0.3,
-//	})
+//	results, err := db.Search(ctx, "docs", queryVec, tidevec.SearchOptions{TopK: 10})
 package tidevec
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"time"
-
-	pb "github.com/ashishodu2023/TideVec/sdk/go/tidevec"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 )
 
-// ================================================================
-// Half-life presets (milliseconds)
-// ================================================================
+// Half-life presets in milliseconds.
 const (
 	HalfLifeOneHour  int64 = 3_600_000
 	HalfLifeOneDay   int64 = 86_400_000
 	HalfLifeOneWeek  int64 = 604_800_000
 	HalfLifeOneMonth int64 = 2_592_000_000
 	HalfLifeOneYear  int64 = 31_536_000_000
-
-	// Semantic aliases
-	HalfLifeAgentSession  = HalfLifeOneHour
-	HalfLifeNewsFeed      = HalfLifeOneDay
-	HalfLifeSupportTicket = HalfLifeOneMonth
-	HalfLifeDocumentStore = HalfLifeOneYear
 )
 
-// ================================================================
-// Domain types
-// ================================================================
-
-// EdgeType defines the semantic relationship between two vectors.
+// EdgeType represents a causal relationship type.
 type EdgeType string
 
 const (
@@ -71,501 +48,206 @@ const (
 	EdgeSupports    EdgeType = "SUPPORTS"
 )
 
-// QueryMode controls how results are expanded.
-type QueryMode string
-
-const (
-	ModeVectorOnly         QueryMode = "vector_only"
-	ModeCausalExpand       QueryMode = "causal_expand"
-	ModeContradictionCheck QueryMode = "contradiction_check"
-	ModeEntityResolve      QueryMode = "entity_resolve"
-)
-
-// Device hint for accelerator routing.
-type Device string
-
-const (
-	DeviceAuto Device = "auto"
-	DeviceCPU  Device = "cpu"
-	DeviceGPU  Device = "gpu"
-	DeviceTPU  Device = "tpu"
-)
-
 // CausalEdge links two vectors with a typed relationship.
 type CausalEdge struct {
-	TargetID string
-	Type     EdgeType
-	Weight   float32
+	TargetID string   `json:"target_id"`
+	Type     EdgeType `json:"type"`
+	Weight   float32  `json:"weight"`
 }
 
-// Vector is the core unit stored in TideVec.
+// Vector is a record stored in a TideVec collection.
 type Vector struct {
-	ID          string
-	Embedding   []float32
-	Payload     map[string]string
-	CreatedAt   int64  // ms since epoch; 0 = server-assigned
-	ValidUntil  int64  // ms since epoch; 0 = no expiry
-	TTLSeconds  int64
-	Edges       []CausalEdge
+	ID          string            `json:"id"`
+	Embedding   []float32         `json:"embedding"`
+	Payload     map[string]string `json:"payload,omitempty"`
+	Edges       []CausalEdge      `json:"edges,omitempty"`
+	TimestampMs *int64            `json:"timestamp_ms,omitempty"`
 }
 
-// CollectionConfig holds parameters for CreateCollection.
+// CollectionConfig holds settings for a new collection.
 type CollectionConfig struct {
-	Name           string
-	Dim            int
-	IndexType      string  // "tvindex" | "flat"
-	Metric         string  // "cosine" | "l2" | "dot"
-	NShards        int
-	NReplicas      int
-	WriteQuorum    int
-	HalfLifeMs     int64
-	TemporalBlend  float32
+	Name               string  `json:"name"`
+	Dim                int     `json:"dim"`
+	HalfLifeMs         int64   `json:"half_life_ms,omitempty"`
+	TemporalBlend      float32 `json:"temporal_blend,omitempty"`
+	NShards            int     `json:"n_shards,omitempty"`
+	NReplicas          int     `json:"n_replicas,omitempty"`
+	IndexType          string  `json:"index_type,omitempty"`
+	StalenessThreshold float32 `json:"staleness_threshold,omitempty"`
 }
 
-// CollectionInfo holds collection metadata.
-type CollectionInfo struct {
-	Name      string
-	NVectors  uint64
-	NShards   uint32
-	Dim       uint32
-	IndexType string
-	Metric    string
+// SearchOptions controls how a search query is executed.
+type SearchOptions struct {
+	TopK              int     `json:"top_k"`
+	TemporalBlend     float32 `json:"temporal_blend,omitempty"`
+	Mode              string  `json:"mode,omitempty"`
+	CausalHops        int     `json:"causal_hops,omitempty"`
+	IncludeTrace      bool    `json:"include_trace,omitempty"`
+	StalenessWarnings bool    `json:"include_staleness_warnings,omitempty"`
 }
 
-// SearchRequest specifies a vector search.
-type SearchRequest struct {
-	Vector                  []float32
-	TopK                    int
-	TemporalBlend           float32
-	Mode                    QueryMode
-	CausalHops              int
-	Filter                  string
-	Metric                  string
-	IncludeTrace            bool
-	IncludeStalenessWarnings bool
-	Device                  Device
-}
-
-// SearchHit is one result from a vector search.
+// SearchHit is a single result from a search query.
 type SearchHit struct {
-	ID               string
-	Score            float32
-	VectorScore      float32
-	TemporalScore    float32
-	Payload          map[string]string
-	CreatedAt        int64
-	StalenessWarning bool
-	StalenessReason  string
-	CausalNeighbors  []string
-	ContradictedBy   []string
+	ID               string            `json:"id"`
+	Score            float32           `json:"score"`
+	SemanticScore    float32           `json:"semantic_score"`
+	TemporalScore    float32           `json:"temporal_score"`
+	Payload          map[string]string `json:"payload"`
+	StalenessWarning bool              `json:"staleness_warning"`
+	StalenessReason  string            `json:"staleness_reason"`
 }
 
-// SearchResponse wraps results from a search call.
+// SearchResponse wraps search results with an optional trace.
 type SearchResponse struct {
-	Hits      []SearchHit
-	Count     uint64
-	LatencyMs float64
-	QueryID   string
-	Strategy  string
+	Hits  []SearchHit `json:"hits"`
+	Trace *struct {
+		Algorithm      string  `json:"algorithm"`
+		LatencyMs      float64 `json:"latency_ms"`
+		RecallEstimate float32 `json:"recall_estimate"`
+		DeviceUsed     string  `json:"device_used"`
+	} `json:"trace,omitempty"`
 }
 
-// Edge defines a causal relationship for AddEdges.
-type Edge struct {
-	Src    string
-	Tgt    string
-	Type   EdgeType
-	Weight float32
+// ClientConfig holds optional settings for the HTTP client.
+type ClientConfig struct {
+	APIKey     string
+	TimeoutMs  int
+	MaxRetries int
 }
 
-// HealthResponse holds server health info.
-type HealthResponse struct {
-	Status       string
-	Version      string
-	Collections  uint64
-	TimestampMs  uint64
-	GPUAvailable bool
-	TPUAvailable bool
-}
-
-// ================================================================
-// Client
-// ================================================================
-
-// Client is a TideVec gRPC client.
+// Client is a TideVec REST client.
 type Client struct {
-	conn    *grpc.ClientConn
-	stub    pb.TideVecClient
-	apiKey  string
-	timeout time.Duration
+	baseURL    string
+	httpClient *http.Client
+	apiKey     string
+	maxRetries int
 }
 
-// Option configures a Client.
-type Option func(*Client)
+// New creates a TideVec client connected to the given host:port.
+func New(hostPort string, cfg ...ClientConfig) (*Client, error) {
+	timeout := 30 * time.Second
+	apiKey := ""
+	maxRetries := 3
 
-// WithAPIKey sets the API key sent with every request.
-func WithAPIKey(key string) Option {
-	return func(c *Client) { c.apiKey = key }
-}
-
-// WithTimeout sets the default RPC timeout.
-func WithTimeout(d time.Duration) Option {
-	return func(c *Client) { c.timeout = d }
-}
-
-// New creates a new TideVec client.
-func New(addr string, opts ...Option) (*Client, error) {
-	conn, err := grpc.Dial(addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(256*1024*1024),
-			grpc.MaxCallSendMsgSize(256*1024*1024),
-		),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("tidevec: dial %s: %w", addr, err)
+	if len(cfg) > 0 {
+		if cfg[0].TimeoutMs > 0 {
+			timeout = time.Duration(cfg[0].TimeoutMs) * time.Millisecond
+		}
+		apiKey = cfg[0].APIKey
+		if cfg[0].MaxRetries > 0 {
+			maxRetries = cfg[0].MaxRetries
+		}
 	}
+
 	c := &Client{
-		conn:    conn,
-		stub:    pb.NewTideVecClient(conn),
-		timeout: 30 * time.Second,
-	}
-	for _, o := range opts {
-		o(c)
+		baseURL:    "http://" + hostPort,
+		httpClient: &http.Client{Timeout: timeout},
+		apiKey:     apiKey,
+		maxRetries: maxRetries,
 	}
 	return c, nil
 }
 
-// Close releases the gRPC connection.
-func (c *Client) Close() error { return c.conn.Close() }
+// Close is a no-op for the HTTP client (provided for interface symmetry).
+func (c *Client) Close() {}
 
-func (c *Client) ctx(parent context.Context) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithTimeout(parent, c.timeout)
-	if c.apiKey != "" {
-		ctx = metadata.AppendToOutgoingContext(ctx, "x-api-key", c.apiKey)
-	}
-	return ctx, cancel
-}
-
-// ---- Health ----------------------------------------------------
-
-// Health checks server health.
-func (c *Client) Health(parent context.Context) (*HealthResponse, error) {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-	resp, err := c.stub.Health(ctx, &pb.HealthRequest{})
+// Ping checks whether the server is reachable.
+func (c *Client) Ping(ctx context.Context) bool {
+	resp, err := c.get(ctx, "/health")
 	if err != nil {
-		return nil, fmt.Errorf("tidevec: health: %w", err)
+		return false
 	}
-	return &HealthResponse{
-		Status:       resp.Status,
-		Version:      resp.Version,
-		Collections:  resp.Collections,
-		TimestampMs:  resp.TimestampMs,
-		GPUAvailable: resp.GpuAvailable,
-		TPUAvailable: resp.TpuAvailable,
-	}, nil
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
-
-// Ping returns true if server is reachable.
-func (c *Client) Ping(parent context.Context) bool {
-	_, err := c.Health(parent)
-	return err == nil
-}
-
-// ---- Collections -----------------------------------------------
 
 // CreateCollection creates a new vector collection.
-func (c *Client) CreateCollection(parent context.Context, cfg CollectionConfig) error {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-
-	if cfg.IndexType == "" {
-		cfg.IndexType = "tvindex"
-	}
-	if cfg.Metric == "" {
-		cfg.Metric = "cosine"
-	}
-	if cfg.NShards == 0 {
-		cfg.NShards = 4
-	}
-	if cfg.NReplicas == 0 {
-		cfg.NReplicas = 1
-	}
-	if cfg.WriteQuorum == 0 {
-		cfg.WriteQuorum = 1
-	}
-	if cfg.HalfLifeMs == 0 {
-		cfg.HalfLifeMs = HalfLifeOneMonth
-	}
-	if cfg.TemporalBlend == 0 {
-		cfg.TemporalBlend = 0.3
-	}
-
-	_, err := c.stub.CreateCollection(ctx, &pb.CreateCollectionRequest{
-		Name:        cfg.Name,
-		Dim:         uint32(cfg.Dim),
-		IndexType:   cfg.IndexType,
-		NShards:     uint32(cfg.NShards),
-		NReplicas:   uint32(cfg.NReplicas),
-		WriteQuorum: uint32(cfg.WriteQuorum),
-		Temporal: &pb.TemporalConfig{
-			HalfLifeMs:    cfg.HalfLifeMs,
-			TemporalBlend: cfg.TemporalBlend,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("tidevec: create_collection %s: %w", cfg.Name, err)
-	}
-	return nil
+func (c *Client) CreateCollection(ctx context.Context, cfg CollectionConfig) error {
+	_, err := c.postJSON(ctx, "/v1/collections", cfg)
+	return err
 }
 
 // DropCollection deletes a collection and all its vectors.
-func (c *Client) DropCollection(parent context.Context, name string) error {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-	_, err := c.stub.DropCollection(ctx, &pb.DropCollectionRequest{Name: name})
+func (c *Client) DropCollection(ctx context.Context, name string) error {
+	_, err := c.postJSON(ctx, "/v1/collections/"+name+"/delete", struct{}{})
 	return err
-}
-
-// GetCollection returns collection metadata.
-func (c *Client) GetCollection(parent context.Context, name string) (*CollectionInfo, error) {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-	resp, err := c.stub.GetCollection(ctx, &pb.GetCollectionRequest{Name: name})
-	if err != nil {
-		return nil, fmt.Errorf("tidevec: get_collection %s: %w", name, err)
-	}
-	return &CollectionInfo{
-		Name:     resp.Info.Name,
-		NVectors: resp.Info.NVectors,
-		NShards:  resp.Info.NShards,
-		Dim:      resp.Info.Dim,
-	}, nil
-}
-
-// ListCollections returns all collections.
-func (c *Client) ListCollections(parent context.Context) ([]CollectionInfo, error) {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-	resp, err := c.stub.ListCollections(ctx, &pb.ListCollectionsRequest{})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]CollectionInfo, len(resp.Collections))
-	for i, col := range resp.Collections {
-		out[i] = CollectionInfo{
-			Name: col.Name, NVectors: col.NVectors,
-			NShards: col.NShards, Dim: col.Dim,
-		}
-	}
-	return out, nil
-}
-
-// SetTemporal updates the temporal decay config for a collection.
-func (c *Client) SetTemporal(parent context.Context, name string,
-	halfLifeMs int64, blend float32) error {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-	_, err := c.stub.UpdateTemporal(ctx, &pb.UpdateTemporalRequest{
-		Name: name,
-		Config: &pb.TemporalConfig{
-			HalfLifeMs: halfLifeMs, TemporalBlend: blend,
-		},
-	})
-	return err
-}
-
-// ---- Vectors ---------------------------------------------------
-
-func edgeTypeToProto(t EdgeType) pb.EdgeType {
-	switch t {
-	case EdgeCauses:      return pb.EdgeType_CAUSES
-	case EdgeContradicts: return pb.EdgeType_CONTRADICTS
-	case EdgeUpdates:     return pb.EdgeType_UPDATES
-	case EdgeRelatedTo:   return pb.EdgeType_RELATED_TO
-	case EdgeEntityOf:    return pb.EdgeType_ENTITY_OF
-	case EdgeSupports:    return pb.EdgeType_SUPPORTS
-	default:              return pb.EdgeType_RELATED_TO
-	}
 }
 
 // Upsert inserts or updates vectors in a collection.
-func (c *Client) Upsert(parent context.Context, collection string, vectors []Vector) error {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-
-	pbVecs := make([]*pb.Vector, len(vectors))
-	for i, v := range vectors {
-		edges := make([]*pb.CausalEdge, len(v.Edges))
-		for j, e := range v.Edges {
-			edges[j] = &pb.CausalEdge{
-				TargetId: e.TargetID,
-				Type:     edgeTypeToProto(e.Type),
-				Weight:   e.Weight,
-			}
-		}
-		pbVecs[i] = &pb.Vector{
-			Id:         v.ID,
-			Embedding:  v.Embedding,
-			Payload:    v.Payload,
-			TtlSeconds: v.TTLSeconds,
-			Edges:      edges,
-		}
-	}
-	_, err := c.stub.Upsert(ctx, &pb.UpsertRequest{
-		Collection: collection,
-		Vectors:    pbVecs,
-	})
+func (c *Client) Upsert(ctx context.Context, collection string, vectors []Vector) error {
+	body := map[string]interface{}{"vectors": vectors}
+	_, err := c.postJSON(ctx, "/v1/collections/"+collection+"/upsert", body)
 	return err
 }
 
-// Delete removes vectors by ID.
-func (c *Client) Delete(parent context.Context, collection string, ids []string) (uint64, error) {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-	resp, err := c.stub.Delete(ctx, &pb.DeleteRequest{
-		Collection: collection, Ids: ids,
-	})
-	if err != nil {
-		return 0, err
+// Search queries a collection for the nearest vectors to the given embedding.
+func (c *Client) Search(ctx context.Context, collection string, embedding []float32, opts SearchOptions) (*SearchResponse, error) {
+	body := map[string]interface{}{
+		"vector":                     embedding,
+		"top_k":                      opts.TopK,
+		"temporal_blend":             opts.TemporalBlend,
+		"mode":                       opts.Mode,
+		"causal_hops":                opts.CausalHops,
+		"include_trace":              opts.IncludeTrace,
+		"include_staleness_warnings": opts.StalenessWarnings,
 	}
-	return resp.Deleted, nil
-}
-
-// ---- Search ----------------------------------------------------
-
-func modeToProto(m QueryMode) pb.QueryMode {
-	switch m {
-	case ModeCausalExpand:       return pb.QueryMode_CAUSAL_EXPAND
-	case ModeContradictionCheck: return pb.QueryMode_CONTRADICTION_CHECK
-	case ModeEntityResolve:      return pb.QueryMode_ENTITY_RESOLVE
-	default:                     return pb.QueryMode_VECTOR_ONLY
-	}
-}
-
-func deviceToProto(d Device) pb.Device {
-	switch d {
-	case DeviceCPU: return pb.Device_CPU
-	case DeviceGPU: return pb.Device_GPU
-	case DeviceTPU: return pb.Device_TPU
-	default:        return pb.Device_AUTO
-	}
-}
-
-func hitFromProto(r *pb.SearchResult) SearchHit {
-	return SearchHit{
-		ID: r.Id, Score: r.Score,
-		VectorScore: r.VectorScore, TemporalScore: r.TemporalScore,
-		Payload: r.Payload, CreatedAt: r.CreatedAt,
-		StalenessWarning: r.StalenessWarning,
-		StalenessReason:  r.StalenessReason,
-		CausalNeighbors:  r.CausalNeighbors,
-		ContradictedBy:   r.ContradictedBy,
-	}
-}
-
-// Search finds nearest neighbours with temporal scoring.
-func (c *Client) Search(parent context.Context, collection string,
-	req SearchRequest) (*SearchResponse, error) {
-
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-
-	if req.TopK == 0 {
-		req.TopK = 10
-	}
-
-	opts := &pb.SearchOptions{
-		TopK:                     uint32(req.TopK),
-		TemporalBlend:            req.TemporalBlend,
-		Mode:                     modeToProto(req.Mode),
-		CausalHops:               uint32(req.CausalHops),
-		Filter:                   req.Filter,
-		IncludeTrace:             req.IncludeTrace,
-		IncludeStalenessWarnings: req.IncludeStalenessWarnings,
-		DeviceHint:               deviceToProto(req.Device),
-	}
-
-	resp, err := c.stub.Search(ctx, &pb.SearchRequest{
-		Collection: collection,
-		Vector:     req.Vector,
-		Options:    opts,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("tidevec: search: %w", err)
-	}
-
-	hits := make([]SearchHit, len(resp.Results))
-	for i, r := range resp.Results {
-		hits[i] = hitFromProto(r)
-	}
-
-	out := &SearchResponse{
-		Hits:  hits,
-		Count: resp.Count,
-	}
-	if req.IncludeTrace && resp.Trace != nil {
-		out.LatencyMs = resp.Trace.LatencyMs
-		out.QueryID   = resp.Trace.QueryId
-		out.Strategy  = resp.Trace.Strategy
-	}
-	return out, nil
-}
-
-// BatchSearch sends multiple queries in one GPU/TPU call.
-func (c *Client) BatchSearch(parent context.Context, collection string,
-	queries [][]float32, topK int, blend float32, device Device) ([]SearchResponse, error) {
-
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-
-	reqs := make([]*pb.SearchRequest, len(queries))
-	for i, q := range queries {
-		reqs[i] = &pb.SearchRequest{
-			Collection: collection,
-			Vector:     q,
-			Options: &pb.SearchOptions{
-				TopK:          uint32(topK),
-				TemporalBlend: blend,
-				DeviceHint:    deviceToProto(device),
-			},
-		}
-	}
-	resp, err := c.stub.BatchSearch(ctx, &pb.BatchSearchRequest{
-		Collection: collection, Queries: reqs,
-	})
+	data, err := c.postJSON(ctx, "/v1/collections/"+collection+"/search", body)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]SearchResponse, len(resp.Responses))
-	for i, sr := range resp.Responses {
-		hits := make([]SearchHit, len(sr.Results))
-		for j, r := range sr.Results {
-			hits[j] = hitFromProto(r)
-		}
-		out[i] = SearchResponse{Hits: hits, Count: sr.Count}
+	var result SearchResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("tidevec: failed to decode search response: %w", err)
 	}
-	return out, nil
+	return &result, nil
 }
 
-// ---- Graph -----------------------------------------------------
+// DeleteVectors removes specific vectors from a collection by ID.
+func (c *Client) DeleteVectors(ctx context.Context, collection string, ids []string) error {
+	body := map[string]interface{}{"ids": ids}
+	_, err := c.postJSON(ctx, "/v1/collections/"+collection+"/delete", body)
+	return err
+}
 
-// AddEdges creates causal relationships between vectors.
-func (c *Client) AddEdges(parent context.Context, collection string, edges []Edge) (uint64, error) {
-	ctx, cancel := c.ctx(parent)
-	defer cancel()
-	pbEdges := make([]*pb.Edge, len(edges))
-	for i, e := range edges {
-		pbEdges[i] = &pb.Edge{
-			Src: e.Src, Tgt: e.Tgt,
-			Type: edgeTypeToProto(e.Type), Weight: e.Weight,
-		}
-	}
-	resp, err := c.stub.AddEdges(ctx, &pb.AddEdgesRequest{
-		Collection: collection, Edges: pbEdges,
-	})
+// --- internal helpers ---
+
+func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return resp.Added, nil
+	if c.apiKey != "" {
+		req.Header.Set("X-Api-Key", c.apiKey)
+	}
+	return c.httpClient.Do(req)
+}
+
+func (c *Client) postJSON(ctx context.Context, path string, payload interface{}) ([]byte, error) {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("tidevec: marshal error: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("X-Api-Key", c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("tidevec: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("tidevec: read response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("tidevec: server error %d: %s", resp.StatusCode, string(data))
+	}
+	return data, nil
 }
