@@ -1,17 +1,17 @@
 // ================================================================
-// collection.hpp — CortexDB collection handle
+// collection.hpp — TideVec collection handle
 // ================================================================
 
 #pragma once
 
-#include <cortexdb/client.hpp>
+#include <tidevec/client.hpp>
 
-namespace cortexdb {
+namespace tidevec {
 
 // Convenience wrapper — binds a client + collection name together
 class Collection {
 public:
-    Collection(CortexDB& db, std::string name)
+    Collection(TideVec& db, std::string name)
         : db_(db), name_(std::move(name)) {}
 
     void upsert(const std::vector<Vector>& vecs) {
@@ -41,8 +41,8 @@ public:
     const std::string& name() const { return name_; }
 
 private:
-    CortexDB&   db_;
+    TideVec&   db_;
     std::string name_;
 };
 
-} // namespace cortexdb
+} // namespace tidevec

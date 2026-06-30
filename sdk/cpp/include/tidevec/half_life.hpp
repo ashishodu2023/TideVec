@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-namespace cortexdb {
+namespace tidevec {
 
 struct HalfLife {
     static constexpr int64_t ONE_HOUR   =     3'600'000LL; // agent sessions
@@ -16,4 +16,4 @@ struct HalfLife {
     static constexpr int64_t ONE_YEAR   = 31'536'000'000LL;// long-term knowledge
 };
 
-} // namespace cortexdb
+} // namespace tidevec

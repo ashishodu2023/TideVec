@@ -9,7 +9,7 @@
 //     GIT_TAG        v0.1.0
 //     
 //   )
-//   FetchContent_MakeAvailable(cortexdb)
+//   FetchContent_MakeAvailable(tidevec)
 //   target_link_libraries(my_app PRIVATE tidevec::tidevec)
 //
 // Or via vcpkg:

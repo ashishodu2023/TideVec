@@ -1,21 +1,21 @@
 // ================================================================
-// client.hpp — CortexDB C++ SDK HTTP client
+// client.hpp — TideVec C++ SDK HTTP client
 //
 // Header-only implementation using cpp-httplib (bundled).
 // No external dependencies required for basic usage.
 //
 // Usage:
-//   #include <cortexdb/cortexdb.hpp>
+//   #include <tidevec/tidevec.hpp>
 //
-//   cortexdb::CortexDB db("localhost:6399");
+//   tidevec::TideVec db("localhost:6399");
 //   // optional auth
-//   cortexdb::CortexDB db("localhost:6399", {.api_key = "cdb_xxx"});
+//   tidevec::TideVec db("localhost:6399", {.api_key = "cdb_xxx"});
 // ================================================================
 
 #pragma once
 
-#include <cortexdb/types.hpp>
-#include <cortexdb/exceptions.hpp>
+#include <tidevec/types.hpp>
+#include <tidevec/exceptions.hpp>
 
 #include <string>
 #include <vector>
@@ -31,7 +31,7 @@
 #include <sstream>
 
 // ── Minimal JSON builder (no external deps) ───────────────────────
-namespace cortexdb::detail {
+namespace tidevec::detail {
 
 inline std::string json_str(const std::string& s) {
     std::string out = "\"";
@@ -157,10 +157,10 @@ inline HttpResponse http_get(const std::string& host, int port,
     return r;
 }
 
-} // namespace cortexdb::detail
+} // namespace tidevec::detail
 
-// ── CortexDB client ───────────────────────────────────────────────
-namespace cortexdb {
+// ── TideVec client ───────────────────────────────────────────────
+namespace tidevec {
 
 struct ClientConfig {
     std::string api_key;
@@ -169,10 +169,10 @@ struct ClientConfig {
     int         retry_delay_ms  = 100;
 };
 
-class CortexDB {
+class TideVec {
 public:
     // ── Constructors ─────────────────────────────────────────────
-    explicit CortexDB(const std::string& host_port,
+    explicit TideVec(const std::string& host_port,
                       ClientConfig config = {})
         : config_(std::move(config))
     {
@@ -210,7 +210,7 @@ public:
              << "}}";
         auto r = post("/v1/collections", body.str());
         if (r.status != 200 && r.status != 201)
-            throw CortexDBError("create_collection failed: " + r.body);
+            throw TideVecError("create_collection failed: " + r.body);
     }
 
     void drop_collection(const std::string& name) {
@@ -276,7 +276,7 @@ public:
 
         auto r = post("/v1/collections/" + collection + "/upsert", body.str());
         if (r.status != 200)
-            throw CortexDBError("upsert failed: " + r.body);
+            throw TideVecError("upsert failed: " + r.body);
     }
 
     // ── Single vector upsert (convenience) ───────────────────────
@@ -303,7 +303,7 @@ public:
 
         auto r = post("/v1/collections/" + collection + "/search", body.str());
         if (r.status == 404) throw CollectionNotFound(collection);
-        if (r.status != 200) throw CortexDBError("search failed: " + r.body);
+        if (r.status != 200) throw TideVecError("search failed: " + r.body);
 
         // Return minimal parsed result
         // For full JSON parsing, link against nlohmann/json
@@ -342,7 +342,7 @@ public:
         body << "]}";
         auto r = post("/v1/collections/" + collection + "/edges", body.str());
         if (r.status != 200)
-            throw CortexDBError("add_edges failed: " + r.body);
+            throw TideVecError("add_edges failed: " + r.body);
     }
 
     // ── Temporal config ──────────────────────────────────────────
@@ -357,7 +357,7 @@ public:
              << "}";
         auto r = post("/v1/collections/" + collection + "/temporal", body.str());
         if (r.status != 200)
-            throw CortexDBError("set_temporal failed: " + r.body);
+            throw TideVecError("set_temporal failed: " + r.body);
     }
 
     // ── Delete vectors ───────────────────────────────────────────
@@ -373,7 +373,7 @@ public:
         body << "]}";
         auto r = post("/v1/collections/" + collection + "/delete", body.str());
         if (r.status != 200)
-            throw CortexDBError("delete failed: " + r.body);
+            throw TideVecError("delete failed: " + r.body);
     }
 
 private:
@@ -398,4 +398,4 @@ private:
     }
 };
 
-} // namespace cortexdb
+} // namespace tidevec

@@ -1,5 +1,5 @@
 // ================================================================
-// types.hpp — CortexDB C++ SDK core types
+// types.hpp — TideVec C++ SDK core types
 // ================================================================
 
 #pragma once
@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <functional>
 
-namespace cortexdb {
+namespace tidevec {
 
 // ── Vector types ─────────────────────────────────────────────────
 using Embedding   = std::vector<float>;
@@ -131,4 +131,4 @@ struct CollectionStats {
     std::string index_type;
 };
 
-} // namespace cortexdb
+} // namespace tidevec
