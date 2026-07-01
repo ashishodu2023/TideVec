@@ -2,6 +2,14 @@
 
 Python SDK for [TideVec](https://github.com/ashishodu2023/TideVec) — the world's first temporally-aware, causally-indexed vector database.
 
+
+## Research Paper
+Verma, A. (2026). TideVec: A Production Vector Database Engine with 
+Native Temporal Decay, Causal Graph Storage, and Zero-Downtime Model 
+Migration. SSRN Working Paper 7033039.
+https://ssrn.com/abstract=7033039
+
+
 ## Install
 
 ```bash
