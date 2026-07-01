@@ -10,9 +10,11 @@
 #include <tidevec/index/tv_index.hpp>
 #include <tidevec/graph/causal_graph.hpp>
 #include <tidevec/observability/retrieval_trace.hpp>
+#include <tidevec/api/collection_registry.hpp>
 
 #include <cassert>
 #include <iostream>
+#include <filesystem>
 #include <vector>
 #include <string>
 #include <cmath>
@@ -483,4 +485,44 @@ int main() {
     }
     std::cout << (tests_run - tests_passed) << " TESTS FAILED\n\n";
     return 1;
+}
+
+TEST(persistence_survive_restart) {
+    const std::string data_dir = "/tmp/tidevec_test_persist_" +
+        std::to_string(now_ms());
+    std::filesystem::remove_all(data_dir);
+
+    // Session 1: create + insert
+    {
+        CollectionRegistry reg(data_dir);
+        reg.load_and_recover();
+        CollectionRegistry::CreateParams p;
+        p.name = "persist_col"; p.dim = 4;
+        p.n_shards = 1; p.n_replicas = 1;
+        reg.create(p);
+        auto& col = reg.get("persist_col");
+        for (int i = 0; i < 5; ++i) {
+            CortexVector v;
+            v.id = "v" + std::to_string(i);
+            v.embedding = {float(i), float(i), float(i), float(i)};
+            v.created_at = now_ms(); v.valid_from = v.created_at;
+            col.upsert(v);
+        }
+        ASSERT(col.total_vectors() == 5);
+        ASSERT(std::filesystem::exists(data_dir + "/registry.json"));
+    }
+
+    // Session 2: recover and verify
+    {
+        CollectionRegistry reg(data_dir);
+        reg.load_and_recover();
+        ASSERT(reg.size() == 1);
+        auto& col = reg.get("persist_col");
+        ASSERT(col.total_vectors() == 5);
+        QueryOptions opts; opts.top_k = 5; opts.temporal_blend = 0.0f;
+        auto r = col.search({1,1,1,1}, opts);
+        ASSERT(!r.empty());
+    }
+
+    std::filesystem::remove_all(data_dir);
 }

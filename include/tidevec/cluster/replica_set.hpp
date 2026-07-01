@@ -141,6 +141,47 @@ public:
         is_degraded_ = true;
     }
 
+    // ------ Recovery: replay WAL into primary on startup ----------
+    // Called once at server boot before accepting requests.
+    // Rebuilds the entire in-memory index from the WAL — this is
+    // the standard crash-recovery pattern for a WAL-based storage
+    // engine. Returns the number of records replayed.
+    std::size_t recover_primary() {
+        std::size_t replayed = 0;
+        bool has_wal = false;
+
+        // Check if WAL directory exists and has segments
+        try {
+            for (auto& _ : fs::directory_iterator(cfg_.wal_cfg.dir)) {
+                (void)_;
+                has_wal = true;
+                break;
+            }
+        } catch (...) {}
+
+        if (!has_wal) return 0;
+
+        primary_wal_->replay([&](const WalRecord& rec) {
+            std::size_t off = 0;
+            switch (static_cast<WalOp>(rec.header.op)) {
+                case WalOp::UPSERT: {
+                    auto v = deserialize_vector(rec.payload.data(), off);
+                    primary_->upsert(v);
+                    ++replayed;
+                    break;
+                }
+                case WalOp::DELETE: {
+                    auto id = deserialize_string(rec.payload.data(), off);
+                    primary_->remove(id);
+                    ++replayed;
+                    break;
+                }
+                default: break;
+            }
+        });
+        return replayed;
+    }
+
     // ------ Recovery: replay WAL into empty replica ---------------
     void recover_replica(std::size_t replica_idx) {
         if (replica_idx >= replicas_.size())

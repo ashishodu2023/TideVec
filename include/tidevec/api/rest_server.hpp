@@ -103,7 +103,7 @@ public:
 
     explicit RestServer(Config cfg = RestServerConfig{})
         : cfg_(std::move(cfg))
-        , registry_()
+        , registry_(cfg_.data_dir)
     {
         _register_routes();
     }
@@ -111,9 +111,16 @@ public:
     // Blocking — call from main thread
     void listen() {
         std::cout << "\n╔══════════════════════════════════════╗\n";
-        std::cout << "║   TideVec REST API v0.1.0           ║\n";
+        std::cout << "║   TideVec REST API v0.1.1           ║\n";
         std::cout << "║   http://" << cfg_.host << ":" << cfg_.port << "          ║\n";
         std::cout << "╚══════════════════════════════════════╝\n\n";
+        std::cout << "Data directory: " << cfg_.data_dir << "\n";
+
+        // Recover persisted collections from WAL before accepting requests
+        std::cout << "Recovering persisted collections...\n";
+        registry_.load_and_recover();
+        std::cout << "Ready — " << registry_.size() << " collection(s) loaded\n\n";
+
         std::cout << "Endpoints:\n";
         std::cout << "  GET  /health\n";
         std::cout << "  GET  /v1/info\n";

@@ -309,14 +309,25 @@ class TideVec:
                 "id":          str,
                 "embedding":   List[float],
                 "payload":     Dict[str, str]              (optional),
+                "created_at":  int (ms since epoch)        (optional, defaults to now),
+                "timestamp_ms": int (alias for created_at) (optional),
                 "ttl_seconds": int                          (optional),
                 "edges":       [{"target_id":str,"type":"CAUSES","weight":0.9}]  (optional),
             }
 
         Returns the number of vectors inserted.
         """
+        # Remap timestamp_ms -> created_at so callers can use either name.
+        # The server only reads "created_at"; "timestamp_ms" is silently ignored
+        # by the C++ json_serializers.hpp parser.
+        mapped = []
+        for v in vectors:
+            v = dict(v)  # don't mutate caller's dict
+            if "timestamp_ms" in v and "created_at" not in v:
+                v["created_at"] = v.pop("timestamp_ms")
+            mapped.append(v)
         resp = self._post(f"/v1/collections/{collection}/upsert",
-                          {"vectors": vectors})
+                          {"vectors": mapped})
         return resp["data"]["inserted"]
 
     def upsert_one(self, collection: str, vector: Dict[str, Any]) -> int:

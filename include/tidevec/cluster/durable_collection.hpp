@@ -53,6 +53,20 @@ public:
         _build_shards();
     }
 
+    // ------ Crash recovery ---------------------------------------
+    // Call once after construction, before accepting requests.
+    // Replays all shard WALs to restore in-memory state.
+    // Returns total records replayed across all shards.
+    std::size_t recover() {
+        std::size_t total = 0;
+        for (auto& rs : shard_replicas_)
+            total += rs->recover_primary();
+        if (total > 0)
+            std::cout << "  Recovered " << total
+                      << " WAL records for collection '" << cfg_.name << "'\n";
+        return total;
+    }
+
     // ------ Write API (WAL → shard → replicas) ------------------
 
     void upsert(const CortexVector& vec) {
