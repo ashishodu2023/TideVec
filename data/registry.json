@@ -1,0 +1,16 @@
+[
+  {
+    "dim": 4,
+    "index_type": "tvindex",
+    "metric": "cosine",
+    "n_replicas": 1,
+    "n_shards": 4,
+    "name": "persist_test",
+    "temporal": {
+      "half_life_ms": 2592000000,
+      "staleness_threshold": 0.20000000298023224,
+      "temporal_blend": 0.30000001192092896
+    },
+    "write_quorum": 1
+  }
+]
