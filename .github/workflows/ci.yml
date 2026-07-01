@@ -421,7 +421,7 @@ jobs:
       - name: Build JAR
         run: |
           cd sdk/java
-          mvn -B package -DskipTests             -Drevision=0.1.1             --no-transfer-progress
+          mvn -B package -DskipTests             -Drevision=0.1.2            --no-transfer-progress
           echo "=== Built artifacts ==="
           ls -lh target/*.jar 2>/dev/null || ls -lh target/ | head -10
 
