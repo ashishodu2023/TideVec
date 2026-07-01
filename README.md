@@ -27,6 +27,33 @@ Production RAG systems decay 8–12% recall annually due to embedding staleness.
 
 ---
 
+## Live Demo — Temporal Decay in Action
+
+The same text, two different ages. TideVec ranks the stale copy last — automatically.
+
+![Temporal ranking demo — same semantic score, ranked last due to 30-day age](docs/images/temporal-ranking-demo.png)
+
+The backdated 2023 policy doc has a **higher semantic score (0.837)** than the 2024 update (0.822) — but its final blended score drops to **0.601** because it is 30 days old against a 7-day half-life. `staleness_warning=True` is surfaced directly to the LLM context. No re-embedding. No manual TTL. No filters.
+
+### Ebbinghaus exponential decay curve
+
+![Temporal decay curve — score halves every 7 days, reaching 0.051 at day 30](docs/images/temporal-decay-curve.png)
+
+```
+temporal_score = 2^(−age_days / half_life_days)
+
+day  0 → 1.000   (just indexed, maximum freshness)
+day  7 → 0.500   (one half-life)
+day 14 → 0.250   (two half-lives)
+day 30 → 0.051   (our stale doc — proven in live demo above)
+
+final_score = 0.7 × semantic + 0.3 × temporal
+```
+
+Decay rate is configurable per collection via `half_life_ms`. Presets: `HalfLife.ONE_HOUR`, `ONE_DAY`, `ONE_WEEK`, `ONE_MONTH`, `ONE_YEAR`.
+
+---
+
 ## What Makes TideVec Novel
 
 ### 1. TVIndex — Temporal Vector Index
