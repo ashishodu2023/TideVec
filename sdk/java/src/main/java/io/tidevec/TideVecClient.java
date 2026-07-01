@@ -265,11 +265,162 @@ public class TideVecClient implements AutoCloseable {
     }
 
     private static SearchResponse parseSearchResponse(String json) {
-        // Minimal JSON parser for search hits — no external dependency
         List<SearchHit> hits = new ArrayList<>();
-        int idx = json.indexOf("\"hits\"");
-        if (idx < 0) return new SearchResponse(hits);
-        // Return empty for now — production use should add a proper JSON library
+
+        // Navigate to data.results array
+        // Server returns: {"status":"ok","data":{"results":[...],"count":N}}
+        int dataIdx = json.indexOf("\"data\"");
+        if (dataIdx < 0) return new SearchResponse(hits);
+
+        int resultsIdx = json.indexOf("\"results\"", dataIdx);
+        if (resultsIdx < 0) return new SearchResponse(hits);
+
+        int arrStart = json.indexOf('[', resultsIdx);
+        if (arrStart < 0) return new SearchResponse(hits);
+
+        int arrEnd = findMatchingBracket(json, arrStart, '[', ']');
+        if (arrEnd < 0) return new SearchResponse(hits);
+
+        // Parse each object in the results array
+        int pos = arrStart + 1;
+        while (pos < arrEnd) {
+            // Skip whitespace and commas
+            while (pos < arrEnd && (json.charAt(pos) == ',' ||
+                   Character.isWhitespace(json.charAt(pos)))) pos++;
+            if (pos >= arrEnd) break;
+            if (json.charAt(pos) != '{') { pos++; continue; }
+
+            int objEnd = findMatchingBracket(json, pos, '{', '}');
+            if (objEnd < 0) break;
+
+            String obj = json.substring(pos, objEnd + 1);
+            SearchHit hit = parseHit(obj);
+            if (hit != null) hits.add(hit);
+            pos = objEnd + 1;
+        }
         return new SearchResponse(hits);
+    }
+
+    private static SearchHit parseHit(String obj) {
+        String id              = strField(obj, "id");
+        float  score           = floatField(obj, "score");
+        float  semanticScore   = floatField(obj, "vector_score");
+        float  temporalScore   = floatField(obj, "temporal_score");
+        boolean stale          = boolField(obj, "staleness_warning");
+        String  stalenessReason= strField(obj, "staleness_reason");
+
+        // Parse payload object
+        Map<String, String> payload = new LinkedHashMap<>();
+        int pIdx = obj.indexOf("\"payload\"");
+        if (pIdx >= 0) {
+            int pStart = obj.indexOf('{', pIdx);
+            if (pStart >= 0) {
+                int pEnd = findMatchingBracket(obj, pStart, '{', '}');
+                if (pEnd >= 0) {
+                    String payloadStr = obj.substring(pStart + 1, pEnd);
+                    // Parse key:value string pairs
+                    int i = 0;
+                    while (i < payloadStr.length()) {
+                        while (i < payloadStr.length() &&
+                               (payloadStr.charAt(i) == ',' ||
+                                Character.isWhitespace(payloadStr.charAt(i)))) i++;
+                        if (i >= payloadStr.length()) break;
+                        if (payloadStr.charAt(i) != '"') { i++; continue; }
+                        int kEnd = payloadStr.indexOf('"', i + 1);
+                        if (kEnd < 0) break;
+                        String key = payloadStr.substring(i + 1, kEnd);
+                        i = kEnd + 1;
+                        int colon = payloadStr.indexOf(':', i);
+                        if (colon < 0) break;
+                        i = colon + 1;
+                        while (i < payloadStr.length() &&
+                               Character.isWhitespace(payloadStr.charAt(i))) i++;
+                        if (i >= payloadStr.length()) break;
+                        if (payloadStr.charAt(i) == '"') {
+                            // String value
+                            int vEnd = i + 1;
+                            while (vEnd < payloadStr.length()) {
+                                if (payloadStr.charAt(vEnd) == '\\') { vEnd += 2; continue; }
+                                if (payloadStr.charAt(vEnd) == '"') break;
+                                vEnd++;
+                            }
+                            payload.put(key, payloadStr.substring(i + 1, vEnd));
+                            i = vEnd + 1;
+                        } else {
+                            // Non-string value (number, bool, null)
+                            int vEnd = i;
+                            while (vEnd < payloadStr.length() &&
+                                   payloadStr.charAt(vEnd) != ',' &&
+                                   payloadStr.charAt(vEnd) != '}') vEnd++;
+                            payload.put(key, payloadStr.substring(i, vEnd).trim());
+                            i = vEnd;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (id == null || id.isEmpty()) return null;
+        return new SearchHit(id, score, semanticScore, temporalScore,
+                             payload, stale, stalenessReason != null ? stalenessReason : "");
+    }
+
+    /** Find the closing bracket/brace matching the one at {@code start}. */
+    private static int findMatchingBracket(String s, int start, char open, char close) {
+        int depth = 0;
+        boolean inStr = false;
+        for (int i = start; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && inStr) { i++; continue; }
+            if (c == '"') { inStr = !inStr; continue; }
+            if (inStr) continue;
+            if (c == open)  { depth++; }
+            if (c == close) { depth--; if (depth == 0) return i; }
+        }
+        return -1;
+    }
+
+    private static String strField(String obj, String key) {
+        String pat = "\"" + key + "\"";
+        int idx = obj.indexOf(pat);
+        if (idx < 0) return null;
+        int colon = obj.indexOf(':', idx + pat.length());
+        if (colon < 0) return null;
+        int q1 = obj.indexOf('"', colon + 1);
+        if (q1 < 0) return null;
+        int q2 = q1 + 1;
+        while (q2 < obj.length()) {
+            if (obj.charAt(q2) == '\\') { q2 += 2; continue; }
+            if (obj.charAt(q2) == '"') break;
+            q2++;
+        }
+        return obj.substring(q1 + 1, q2);
+    }
+
+    private static float floatField(String obj, String key) {
+        String pat = "\"" + key + "\"";
+        int idx = obj.indexOf(pat);
+        if (idx < 0) return 0f;
+        int colon = obj.indexOf(':', idx + pat.length());
+        if (colon < 0) return 0f;
+        int start = colon + 1;
+        while (start < obj.length() && Character.isWhitespace(obj.charAt(start))) start++;
+        int end = start;
+        while (end < obj.length() && (Character.isDigit(obj.charAt(end)) ||
+               obj.charAt(end) == '.' || obj.charAt(end) == '-' ||
+               obj.charAt(end) == 'E' || obj.charAt(end) == 'e')) end++;
+        try { return Float.parseFloat(obj.substring(start, end)); }
+        catch (NumberFormatException e) { return 0f; }
+    }
+
+    private static boolean boolField(String obj, String key) {
+        String pat = "\"" + key + "\"";
+        int idx = obj.indexOf(pat);
+        if (idx < 0) return false;
+        int colon = obj.indexOf(':', idx + pat.length());
+        if (colon < 0) return false;
+        int start = colon + 1;
+        while (start < obj.length() && Character.isWhitespace(obj.charAt(start))) start++;
+        return obj.startsWith("true", start);
     }
 }
