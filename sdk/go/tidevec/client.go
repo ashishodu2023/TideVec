@@ -90,8 +90,9 @@ type SearchOptions struct {
 type SearchHit struct {
 	ID               string            `json:"id"`
 	Score            float32           `json:"score"`
-	SemanticScore    float32           `json:"semantic_score"`
+	SemanticScore    float32           `json:"vector_score"`
 	TemporalScore    float32           `json:"temporal_score"`
+	CreatedAt        int64             `json:"created_at"`
 	Payload          map[string]string `json:"payload"`
 	StalenessWarning bool              `json:"staleness_warning"`
 	StalenessReason  string            `json:"staleness_reason"`
@@ -99,13 +100,16 @@ type SearchHit struct {
 
 // SearchResponse wraps search results with an optional trace.
 type SearchResponse struct {
-	Hits  []SearchHit `json:"hits"`
-	Trace *struct {
-		Algorithm      string  `json:"algorithm"`
-		LatencyMs      float64 `json:"latency_ms"`
-		RecallEstimate float32 `json:"recall_estimate"`
-		DeviceUsed     string  `json:"device_used"`
-	} `json:"trace,omitempty"`
+	Hits  []SearchHit `json:"results"` // server field is "results" not "hits"
+	Count int         `json:"count"`
+}
+
+// apiEnvelope is the outer wrapper all TideVec responses use:
+// {"status":"ok","data":{...}} or {"status":"error","error":"..."}
+type apiEnvelope struct {
+	Status string          `json:"status"`
+	Data   json.RawMessage `json:"data"`
+	Error  string          `json:"error"`
 }
 
 // ClientConfig holds optional settings for the HTTP client.
@@ -174,8 +178,29 @@ func (c *Client) DropCollection(ctx context.Context, name string) error {
 }
 
 // Upsert inserts or updates vectors in a collection.
+// If a vector has TimestampMs set, it is remapped to "created_at"
+// which is the field name the server reads for temporal decay.
 func (c *Client) Upsert(ctx context.Context, collection string, vectors []Vector) error {
-	body := map[string]interface{}{"vectors": vectors}
+	// Build a list of plain maps so we can remap timestamp_ms → created_at.
+	// The server reads "created_at", not "timestamp_ms".
+	mapped := make([]map[string]interface{}, len(vectors))
+	for i, v := range vectors {
+		m := map[string]interface{}{
+			"id":        v.ID,
+			"embedding": v.Embedding,
+		}
+		if len(v.Payload) > 0 {
+			m["payload"] = v.Payload
+		}
+		if len(v.Edges) > 0 {
+			m["edges"] = v.Edges
+		}
+		if v.TimestampMs != nil {
+			m["created_at"] = *v.TimestampMs // remap to server field name
+		}
+		mapped[i] = m
+	}
+	body := map[string]interface{}{"vectors": mapped}
 	_, err := c.postJSON(ctx, "/v1/collections/"+collection+"/upsert", body)
 	return err
 }
@@ -191,12 +216,23 @@ func (c *Client) Search(ctx context.Context, collection string, embedding []floa
 		"include_trace":              opts.IncludeTrace,
 		"include_staleness_warnings": opts.StalenessWarnings,
 	}
-	data, err := c.postJSON(ctx, "/v1/collections/"+collection+"/search", body)
+	raw, err := c.postJSON(ctx, "/v1/collections/"+collection+"/search", body)
 	if err != nil {
 		return nil, err
 	}
+
+	// Unwrap the {"status":"ok","data":{...}} envelope
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("tidevec: failed to decode envelope: %w", err)
+	}
+	if env.Status != "ok" {
+		return nil, fmt.Errorf("tidevec: server error: %s", env.Error)
+	}
+
+	// Parse the inner data object — server returns "results" not "hits"
 	var result SearchResponse
-	if err := json.Unmarshal(data, &result); err != nil {
+	if err := json.Unmarshal(env.Data, &result); err != nil {
 		return nil, fmt.Errorf("tidevec: failed to decode search response: %w", err)
 	}
 	return &result, nil
