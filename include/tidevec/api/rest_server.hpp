@@ -112,7 +112,7 @@ public:
     // Blocking — call from main thread
     void listen() {
         std::cout << "\n╔══════════════════════════════════════╗\n";
-        std::cout << "║   TideVec REST API v0.1.1           ║\n";
+        std::cout << "║   TideVec REST API v0.2.0           ║\n";
         std::cout << "║   http://" << cfg_.host << ":" << cfg_.port << "          ║\n";
         std::cout << "╚══════════════════════════════════════╝\n\n";
         std::cout << "Data directory: " << cfg_.data_dir << "\n";
@@ -190,7 +190,7 @@ private:
             ++metrics_.requests_total;
             _json_response(res, {
                 {"status", "ok"},
-                {"version", "0.1.0"},
+                {"version", "0.2.0"},
                 {"collections", registry_.size()},
                 {"timestamp_ms", now_ms()}
             });
@@ -203,7 +203,7 @@ private:
             ++metrics_.requests_total;
             _json_response(res, {
                 {"name", "TideVec"},
-                {"version", "0.1.0"},
+                {"version", "0.2.0"},
                 {"description", "Temporally-aware causal vector database"},
                 {"features", json::array({"TVIndex", "CausalEdge",
                     "DriftBridge", "AgentContext", "RetrievalTrace"})},

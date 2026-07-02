@@ -4,7 +4,7 @@
 
 **The world's first temporally-aware, causally-indexed vector database**
 
-*C++20 · GPU/TPU accelerated · 1B+ vectors · 11-nines durability · Apache 2.0*
+*C++20 · GPU/TPU ready · Temporal decay · Apache 2.0*
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-127%2F127-brightgreen)](tests/)
