@@ -257,6 +257,7 @@ private:
                 p.index_type  = j.value("index_type",  std::string("tvindex"));
                 p.metric      = j.value("metric",      std::string("cosine"));
                 p.n_shards    = j.value("n_shards",    4UL);
+                if (p.n_shards == 0) p.n_shards = 4;  // guard against zero
                 p.n_replicas  = j.value("n_replicas",  1);
                 p.write_quorum= j.value("write_quorum",1);
                 p.data_dir    = cfg_.data_dir;

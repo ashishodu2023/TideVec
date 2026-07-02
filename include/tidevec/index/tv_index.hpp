@@ -174,9 +174,38 @@ public:
         std::unique_lock lock(mutex_);
         auto it = ext_to_int_.find(vec.id);
         if (it != ext_to_int_.end()) {
-            // Simple update: refresh embedding + timestamps (rebuild edges)
+            // ── Update existing vector ──────────────────────────────
+            // The embedding may have changed, so the node's geometric
+            // position has shifted. We must rebuild its graph edges
+            // to reflect the new position — otherwise HNSW traversal
+            // will follow stale connections and miss the updated vector.
+            //
+            // Strategy (standard HNSW update pattern):
+            //   1. Remove the node's back-links from all its neighbours
+            //   2. Clear the node's own neighbour lists
+            //   3. Update embedding / timestamps / payload
+            //   4. Re-link by running the standard insert graph-building
+            //      pass (without creating a new node slot)
+
             uint64_t iid = it->second;
             auto& node = nodes_[iid];
+
+            // Step 1: remove back-links from all current neighbours
+            for (int layer = 0; layer <= node.level(); ++layer) {
+                for (uint64_t nb_id : node.neighbours[layer]) {
+                    auto& nb_nbs = nodes_[nb_id].neighbours[layer];
+                    nb_nbs.erase(
+                        std::remove(nb_nbs.begin(), nb_nbs.end(), iid),
+                        nb_nbs.end());
+                }
+            }
+
+            // Step 2: clear the node's neighbour lists
+            // Keep the same number of layers (level doesn't change on update)
+            for (auto& layer_nbs : node.neighbours)
+                layer_nbs.clear();
+
+            // Step 3: update embedding, timestamps, payload
             if (cfg_.use_pq_compression) {
                 if (!quantizer_ready())
                     throw std::runtime_error(
@@ -187,11 +216,45 @@ public:
             } else {
                 node.embedding = vec.embedding;
             }
-            node.created_at = vec.created_at;
-            node.valid_from = vec.valid_from;
-            node.valid_until= vec.valid_until;
-            node.payload    = vec.payload;
-            // Note: full edge rebuild on update is a TODO for v0.2
+            node.created_at  = vec.created_at;
+            node.valid_from  = vec.valid_from;
+            node.valid_until = vec.valid_until;
+            node.payload     = vec.payload;
+
+            // Step 4: re-link into the graph at the node's existing level
+            // Use the same greedy descent + beam-search as _insert_locked,
+            // but write into the existing node slot instead of appending.
+            if (entry_point_ >= 0 &&
+                static_cast<uint64_t>(entry_point_) != iid) {
+
+                const std::vector<float>& link_query = vec.embedding;
+                Timestamp qt = vec.created_at;
+                Metric m = cfg_.metric;
+                uint64_t ep = static_cast<uint64_t>(entry_point_);
+                int top_layer = nodes_[ep].level();
+                int new_level = node.level();
+
+                // Descend to new_level+1
+                for (int layer = top_layer; layer > new_level; --layer)
+                    ep = _greedy_closest(link_query, ep, layer, qt, m);
+
+                // Re-connect at each layer from new_level down to 0
+                for (int layer = std::min(new_level, top_layer); layer >= 0; --layer) {
+                    int M_layer = (layer == 0) ? cfg_.M0 : cfg_.M;
+                    auto cands = _beam_search(link_query, ep, layer,
+                                              cfg_.ef_construction, qt, m, "");
+
+                    int take = std::min(M_layer, static_cast<int>(cands.size()));
+                    for (int i = 0; i < take; ++i) {
+                        uint64_t nb = cands[i].second;
+                        if (nb == iid) continue; // don't self-link
+                        node.neighbours[layer].push_back(nb);
+                        nodes_[nb].neighbours[layer].push_back(iid);
+                        _prune_neighbours(nb, layer, M_layer, qt, m, link_query);
+                    }
+                    if (!cands.empty()) ep = cands[0].second;
+                }
+            }
         } else {
             _insert_locked(vec);
         }

@@ -167,12 +167,16 @@ func (c *Client) Ping(ctx context.Context) bool {
 
 // CreateCollection creates a new vector collection.
 func (c *Client) CreateCollection(ctx context.Context, cfg CollectionConfig) error {
-	// Server expects temporal config nested under "temporal" key:
-	// {"name":"...","dim":768,"temporal":{"half_life_ms":...,"temporal_blend":...}}
+	// Default n_shards to 4 if not set
+	nShards := cfg.NShards
+	if nShards <= 0 {
+		nShards = 4
+	}
+	// Server expects temporal config nested under "temporal" key
 	body := map[string]interface{}{
 		"name":       cfg.Name,
 		"dim":        cfg.Dim,
-		"n_shards":   cfg.NShards,
+		"n_shards":   nShards,
 		"n_replicas": cfg.NReplicas,
 		"index_type": cfg.IndexType,
 		"temporal": map[string]interface{}{

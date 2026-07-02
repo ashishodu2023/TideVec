@@ -235,7 +235,11 @@ private:
     }
 
     ReplicaSet& _shard_for(const std::string& id) {
-        return *shard_replicas_[hash_to_shard(id, cfg_.n_shards)];
+        if (shard_replicas_.empty())
+            throw std::runtime_error(
+                "Collection has no shards — was it created correctly?");
+        std::size_t idx = hash_to_shard(id, shard_replicas_.size());
+        return *shard_replicas_[idx];
     }
 
     std::string _new_query_id() const {
