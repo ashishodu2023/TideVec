@@ -172,6 +172,11 @@ func (c *Client) CreateCollection(ctx context.Context, cfg CollectionConfig) err
 	if nShards <= 0 {
 		nShards = 4
 	}
+	// Default staleness_threshold to 0.20 if not set
+	stalenessThreshold := cfg.StalenessThreshold
+	if stalenessThreshold <= 0 {
+		stalenessThreshold = 0.20
+	}
 	// Server expects temporal config nested under "temporal" key
 	body := map[string]interface{}{
 		"name":       cfg.Name,
@@ -182,7 +187,7 @@ func (c *Client) CreateCollection(ctx context.Context, cfg CollectionConfig) err
 		"temporal": map[string]interface{}{
 			"half_life_ms":        cfg.HalfLifeMs,
 			"temporal_blend":      cfg.TemporalBlend,
-			"staleness_threshold": cfg.StalenessThreshold,
+			"staleness_threshold": stalenessThreshold,
 		},
 	}
 	_, err := c.postJSON(ctx, "/v1/collections", body)
