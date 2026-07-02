@@ -209,7 +209,9 @@ public:
     bool        is_degraded()  const { return is_degraded_; }
     int         n_replicas()   const { return static_cast<int>(replicas_.size()); }
 
-    const Collection& primary() const { return *primary_; }
+    // Expose primary Collection for DriftBridge snapshotting.
+    Collection*       primary()       { return primary_.get(); }
+    const Collection* primary() const { return primary_.get(); }
 
 private:
     Config cfg_;

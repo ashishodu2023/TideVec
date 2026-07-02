@@ -36,6 +36,7 @@
 #include <tidevec/api/httplib.h>
 #include <tidevec/api/json_serializers.hpp>
 #include <tidevec/api/collection_registry.hpp>
+#include <tidevec/drift/drift_bridge.hpp>
 
 #include <string>
 #include <atomic>
@@ -460,6 +461,185 @@ private:
         });
 
         // --------------------------------------------------------
+        // POST /v1/collections/{name}/drift/start
+        // Body: {"new_dim":1536,"new_metric":"cosine","reembed_url":"http://..."}
+        //
+        // Starts a zero-downtime model migration on the named collection.
+        // TideVec builds a shadow index in the background while the live
+        // index continues serving queries. The caller supplies a
+        // reembed_url — an HTTP endpoint that accepts:
+        //   POST {"id":"v1","payload":{...}} → {"embedding":[...]}
+        // and returns the new-model embedding for each vector.
+        //
+        // Returns immediately; poll GET /drift/status for progress.
+        // --------------------------------------------------------
+        svr_.Post(R"(/v1/collections/([^/]+)/drift/start)",
+            [this](const httplib::Request& req, httplib::Response& res) {
+            ++metrics_.requests_total;
+            if (!_auth(req, res)) return;
+            std::string name = req.matches[1];
+            try {
+                auto& col = registry_.get(name);
+                auto j    = json::parse(req.body);
+
+                std::string reembed_url =
+                    j.value("reembed_url", "");
+                if (reembed_url.empty()) {
+                    _error(res, "reembed_url is required — "
+                           "POST {\"id\":...,\"payload\":...} → {\"embedding\":[...]}");
+                    return;
+                }
+
+                // Build new TVIndex config from request
+                TVIndexConfig new_cfg;
+                new_cfg.M               = j.value("M",               16);
+                new_cfg.ef_construction = j.value("ef_construction", 200);
+                if (j.contains("temporal"))
+                    new_cfg.temporal = temporal_cfg_from_json(j["temporal"]);
+                else
+                    new_cfg.temporal = col.temporal_config();
+
+                // Get current config for the old index
+                TVIndexConfig old_cfg;
+                old_cfg.temporal = col.temporal_config();
+
+                // Check if a migration is already running
+                {
+                    std::lock_guard<std::mutex> lg(drift_mutex_);
+                    if (drift_bridges_.count(name)) {
+                        auto phase = drift_bridges_[name]->phase();
+                        if (phase == DriftPhase::MIGRATING ||
+                            phase == DriftPhase::SWAPPING) {
+                            _error(res, "Migration already in progress for: " + name);
+                            return;
+                        }
+                        drift_bridges_.erase(name);
+                    }
+                }
+
+                // Snapshot current vectors for migration
+                auto live_vectors = col.snapshot_vectors();
+                std::size_t total = live_vectors.size();
+
+                // Create bridge
+                auto bridge = std::make_unique<DriftBridge>(old_cfg, new_cfg);
+                auto* bridge_ptr = bridge.get();
+
+                {
+                    std::lock_guard<std::mutex> lg(drift_mutex_);
+                    drift_bridges_[name] = std::move(bridge);
+                }
+
+                // Re-embed callback: HTTP POST to caller's endpoint
+                std::string url = reembed_url;
+                ReEmbedFn re_embed = [url](
+                    const std::string& id,
+                    const std::unordered_map<std::string,std::string>& payload)
+                    -> std::vector<float>
+                {
+                    // Build request JSON
+                    json body = {{"id", id}, {"payload", payload}};
+                    std::string body_str = body.dump();
+
+                    httplib::Client cli(url);
+                    auto r = cli.Post("/", body_str, "application/json");
+                    if (!r || r->status != 200) return {};
+
+                    try {
+                        auto rj = json::parse(r->body);
+                        if (!rj.contains("embedding")) return {};
+                        return rj["embedding"].get<std::vector<float>>();
+                    } catch (...) { return {}; }
+                };
+
+                // on_complete callback — swap the live index
+                auto on_complete = [this, name, &col](CortexVector) {
+                    std::lock_guard<std::mutex> lg(drift_mutex_);
+                    auto it = drift_bridges_.find(name);
+                    if (it == drift_bridges_.end()) return;
+                    auto shadow = it->second->take_shadow();
+                    if (shadow) col.swap_index(std::move(shadow));
+                };
+
+                bridge_ptr->start(live_vectors, re_embed, on_complete);
+
+                _json_response(res, ok({
+                    {"message",       "Migration started"},
+                    {"collection",    name},
+                    {"total_vectors", total},
+                    {"status_url",
+                        "/v1/collections/" + name + "/drift/status"},
+                }));
+            } catch (const std::exception& e) {
+                _error(res, e.what());
+            }
+        });
+
+        // --------------------------------------------------------
+        // GET /v1/collections/{name}/drift/status
+        // Returns current migration progress.
+        // --------------------------------------------------------
+        svr_.Get(R"(/v1/collections/([^/]+)/drift/status)",
+            [this](const httplib::Request& req, httplib::Response& res) {
+            ++metrics_.requests_total;
+            if (!_auth(req, res)) return;
+            std::string name = req.matches[1];
+
+            std::lock_guard<std::mutex> lg(drift_mutex_);
+            auto it = drift_bridges_.find(name);
+            if (it == drift_bridges_.end()) {
+                _json_response(res, ok({
+                    {"collection", name},
+                    {"phase",      "IDLE"},
+                    {"message",    "No migration in progress"},
+                }));
+                return;
+            }
+
+            auto prog  = it->second->progress();
+            std::string phase_str;
+            switch (prog.phase) {
+                case DriftPhase::IDLE:      phase_str = "IDLE";      break;
+                case DriftPhase::MIGRATING: phase_str = "MIGRATING"; break;
+                case DriftPhase::SWAPPING:  phase_str = "SWAPPING";  break;
+                case DriftPhase::COMPLETE:  phase_str = "COMPLETE";  break;
+                case DriftPhase::FAILED:    phase_str = "FAILED";    break;
+                default:                    phase_str = "UNKNOWN";   break;
+            }
+
+            _json_response(res, ok({
+                {"collection",     name},
+                {"phase",          phase_str},
+                {"total_vectors",  prog.total_vectors},
+                {"migrated",       prog.migrated},
+                {"skipped",        prog.skipped},
+                {"pct_complete",   prog.pct()},
+                {"error",          prog.error},
+            }));
+        });
+
+        // --------------------------------------------------------
+        // POST /v1/collections/{name}/drift/abort
+        // Aborts an in-progress migration, keeps the live index.
+        // --------------------------------------------------------
+        svr_.Post(R"(/v1/collections/([^/]+)/drift/abort)",
+            [this](const httplib::Request& req, httplib::Response& res) {
+            ++metrics_.requests_total;
+            if (!_auth(req, res)) return;
+            std::string name = req.matches[1];
+
+            std::lock_guard<std::mutex> lg(drift_mutex_);
+            auto it = drift_bridges_.find(name);
+            if (it == drift_bridges_.end()) {
+                _error(res, "No migration in progress for: " + name);
+                return;
+            }
+            it->second->abort();
+            drift_bridges_.erase(it);
+            _json_response(res, ok({{"message", "Migration aborted"}, {"collection", name}}));
+        });
+
+        // --------------------------------------------------------
         // Catch-all 404
         // --------------------------------------------------------
         svr_.set_error_handler([this](const httplib::Request&,
@@ -483,6 +663,10 @@ private:
     CollectionRegistry  registry_;
     ServerMetrics       metrics_;
     httplib::Server     svr_;
+
+    // DriftBridge state — one per collection currently migrating
+    std::mutex drift_mutex_;
+    std::unordered_map<std::string, std::unique_ptr<DriftBridge>> drift_bridges_;
 };
 
 } // namespace tidevec

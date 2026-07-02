@@ -148,6 +148,19 @@ public:
         if (tv_)   tv_->set_temporal_config(cfg);
     }
 
+    // Iterate every stored vector — used by DriftBridge for snapshotting.
+    // Only TVIndex supports full vector iteration; FlatIndex iteration
+    // is a future enhancement.
+    void each_vector(std::function<void(const CortexVector&)> fn) const {
+        if (tv_) tv_->each_vector(fn);
+        // FlatIndex iteration not yet implemented — skipped
+    }
+
+    // Atomically swap the TVIndex — called after DriftBridge migration completes.
+    void swap_index(std::unique_ptr<TVIndex> new_idx) {
+        tv_ = std::move(new_idx);
+    }
+
 private:
     Config cfg_;
     std::unique_ptr<FlatIndex>   flat_;

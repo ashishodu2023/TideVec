@@ -53,6 +53,35 @@ public:
         _build_shards();
     }
 
+    // ------ DriftBridge support ----------------------------------
+
+    // Snapshot all vectors for migration — returns a copy of every
+    // vector currently stored across all shards.
+    std::vector<CortexVector> snapshot_vectors() const {
+        std::vector<CortexVector> out;
+        for (const auto& rs : shard_replicas_)
+            rs->primary()->each_vector([&](const CortexVector& v) {
+                out.push_back(v);
+            });
+        return out;
+    }
+
+    // Atomically swap the underlying index after DriftBridge completes.
+    // The caller must have already built the shadow index with new-model
+    // embeddings. After this call the old index is freed.
+    // NOTE: For sharded collections this replaces the primary of shard 0
+    // only (DriftBridge operates on a single-shard snapshot for migration).
+    void swap_index(std::unique_ptr<TVIndex> new_index) {
+        if (!shard_replicas_.empty())
+            shard_replicas_[0]->primary()->swap_index(std::move(new_index));
+    }
+
+    // Return the current temporal config (needed by /drift/start to
+    // preserve temporal settings in the shadow index).
+    TemporalConfig temporal_config() const {
+        return cfg_.temporal;
+    }
+
     // ------ Crash recovery ---------------------------------------
     // Call once after construction, before accepting requests.
     // Replays all shard WALs to restore in-memory state.

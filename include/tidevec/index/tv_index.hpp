@@ -319,6 +319,25 @@ public:
         return nodes_[entry_point_].level();
     }
 
+    // Iterate every non-deleted vector — used by DriftBridge to
+    // snapshot the live index before migration begins.
+    void each_vector(std::function<void(const CortexVector&)> fn) const {
+        std::shared_lock lock(mutex_);
+        for (const auto& node : nodes_) {
+            if (deleted_.count(node.internal_id)) continue;
+            CortexVector v;
+            v.id         = node.external_id;
+            v.embedding  = node.is_compressed()
+                               ? quantizer_->decode(node.pq_code)
+                               : node.embedding;
+            v.payload    = node.payload;
+            v.created_at = node.created_at;
+            v.valid_from = node.valid_from;
+            v.valid_until= node.valid_until;
+            fn(v);
+        }
+    }
+
     void set_temporal_config(const TemporalConfig& cfg) {
         scorer_ = TemporalScorer(cfg);
         cfg_.temporal = cfg;
