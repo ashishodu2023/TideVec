@@ -167,14 +167,44 @@ func (c *Client) Ping(ctx context.Context) bool {
 
 // CreateCollection creates a new vector collection.
 func (c *Client) CreateCollection(ctx context.Context, cfg CollectionConfig) error {
-	_, err := c.postJSON(ctx, "/v1/collections", cfg)
+	// Server expects temporal config nested under "temporal" key:
+	// {"name":"...","dim":768,"temporal":{"half_life_ms":...,"temporal_blend":...}}
+	body := map[string]interface{}{
+		"name":       cfg.Name,
+		"dim":        cfg.Dim,
+		"n_shards":   cfg.NShards,
+		"n_replicas": cfg.NReplicas,
+		"index_type": cfg.IndexType,
+		"temporal": map[string]interface{}{
+			"half_life_ms":        cfg.HalfLifeMs,
+			"temporal_blend":      cfg.TemporalBlend,
+			"staleness_threshold": cfg.StalenessThreshold,
+		},
+	}
+	_, err := c.postJSON(ctx, "/v1/collections", body)
 	return err
 }
 
 // DropCollection deletes a collection and all its vectors.
 func (c *Client) DropCollection(ctx context.Context, name string) error {
-	_, err := c.postJSON(ctx, "/v1/collections/"+name+"/delete", struct{}{})
-	return err
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		c.baseURL+"/v1/collections/"+name, nil)
+	if err != nil {
+		return err
+	}
+	if c.apiKey != "" {
+		req.Header.Set("X-Api-Key", c.apiKey)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("tidevec: drop collection failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("tidevec: drop collection error %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }
 
 // Upsert inserts or updates vectors in a collection.
