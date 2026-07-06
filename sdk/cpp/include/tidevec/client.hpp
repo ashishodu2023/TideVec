@@ -164,6 +164,7 @@ namespace tidevec {
 
 struct ClientConfig {
     std::string api_key;
+    bool        tls             = false;  // use https (requires TLS-terminated endpoint)
     int         timeout_ms      = 30000;
     int         max_retries     = 3;
     int         retry_delay_ms  = 100;
@@ -374,6 +375,57 @@ public:
         auto r = post("/v1/collections/" + collection + "/delete", body.str());
         if (r.status != 200)
             throw TideVecError("delete failed: " + r.body);
+    }
+
+    // ── DriftBridge (zero-downtime model migration) ───────────────
+    void start_drift(const std::string& collection,
+                     const std::string& reembed_url)
+    {
+        std::ostringstream body;
+        body << "{\"reembed_url\":" << detail::json_str(reembed_url) << "}";
+        auto r = post("/v1/collections/" + collection + "/drift/start", body.str());
+        if (r.status != 200)
+            throw TideVecError("start_drift failed: " + r.body);
+    }
+
+    std::string drift_status(const std::string& collection)
+    {
+        auto r = detail::http_get(host_, port_,
+            "/v1/collections/" + collection + "/drift/status", config_.api_key);
+        if (r.status != 200) throw TideVecError("drift_status failed: " + r.body);
+        return r.body;
+    }
+
+    void abort_drift(const std::string& collection)
+    {
+        auto r = post("/v1/collections/" + collection + "/drift/abort", "{}");
+        if (r.status != 200)
+            throw TideVecError("abort_drift failed: " + r.body);
+    }
+
+    // ── Admin (backups, requires auth) ───────────────────────────
+    std::string trigger_backup()
+    {
+        auto r = post("/v1/admin/backup", "{}");
+        if (r.status != 200) throw TideVecError("trigger_backup failed: " + r.body);
+        return r.body;
+    }
+
+    std::string list_backups()
+    {
+        auto r = detail::http_get(host_, port_, "/v1/admin/backups", config_.api_key);
+        if (r.status != 200) throw TideVecError("list_backups failed: " + r.body);
+        return r.body;
+    }
+
+    std::string restore_backup(const std::string& snapshot)
+    {
+        std::ostringstream body;
+        body << "{\"snapshot\":" << detail::json_str(snapshot)
+             << ",\"confirm\":true}";
+        auto r = post("/v1/admin/restore", body.str());
+        if (r.status != 200) throw TideVecError("restore_backup failed: " + r.body);
+        return r.body;
     }
 
 private:

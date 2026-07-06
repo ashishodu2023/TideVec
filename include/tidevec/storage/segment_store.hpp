@@ -47,7 +47,7 @@ struct SegmentHeader {
     uint32_t dim;
     uint64_t n_vectors;
     uint64_t created_at;
-    uint8_t  _pad[36];
+    uint8_t  _pad[32];
 };
 static_assert(sizeof(SegmentHeader) == 64, "SegmentHeader must be 64 bytes");
 
@@ -100,8 +100,13 @@ private:
         struct stat st;
         fstat(fd_, &st);
         size_ = static_cast<std::size_t>(st.st_size);
+#ifdef MAP_POPULATE
         mapped_ = static_cast<uint8_t*>(
             mmap(nullptr, size_, PROT_READ, MAP_SHARED | MAP_POPULATE, fd_, 0));
+#else
+        mapped_ = static_cast<uint8_t*>(
+            mmap(nullptr, size_, PROT_READ, MAP_SHARED, fd_, 0));
+#endif
         if (mapped_ == MAP_FAILED)
             throw std::runtime_error("mmap failed: " + path_);
         header_ = reinterpret_cast<const SegmentHeader*>(mapped_);
@@ -266,7 +271,7 @@ public:
 
     std::size_t total_vectors() const {
         std::shared_lock lock(mutex_);
-        return id_to_loc_.size() + write_buffer_.size();
+        return id_to_loc_.size();
     }
 
     std::size_t n_segments() const {

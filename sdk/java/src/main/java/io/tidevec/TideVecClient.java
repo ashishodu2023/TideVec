@@ -130,14 +130,28 @@ public class TideVecClient implements AutoCloseable {
 
     public record SearchResponse(List<SearchHit> hits) {}
 
+    public record DriftStatus(
+        String collection, String phase,
+        int totalVectors, int migrated, int skipped,
+        double pctComplete, String error
+    ) {}
+
+    public record CollectionInfo(
+        String name, int nVectors, int nShards,
+        int dim, String indexType, String metric, String backend
+    ) {}
+
     // ── Client internals ────────────────────────────────────────────
     private final HttpClient http;
     private final String baseUrl;
     private final String apiKey;
 
-    private TideVecClient(String host, int port, String apiKey, Duration timeout) {
-        this.baseUrl = "http://" + host + ":" + port;
-        this.apiKey  = apiKey;
+    private TideVecClient(String host, int port, String apiKey, Duration timeout, boolean tls) {
+        this.baseUrl = (tls ? "https" : "http") + "://" + host + ":" + port;
+        this.apiKey  = (apiKey != null && !apiKey.isEmpty())
+            ? apiKey
+            : System.getenv("TIDEVEC_API_KEY") != null
+                ? System.getenv("TIDEVEC_API_KEY") : "";
         this.http    = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
 
@@ -146,10 +160,12 @@ public class TideVecClient implements AutoCloseable {
         private final int    port;
         private String   apiKey  = "";
         private Duration timeout = Duration.ofSeconds(30);
+        private boolean  tls     = false;
         ClientBuilder(String host, int port) { this.host = host; this.port = port; }
         public ClientBuilder apiKey(String k)   { this.apiKey = k;   return this; }
         public ClientBuilder timeout(Duration d) { this.timeout = d;  return this; }
-        public TideVecClient build() { return new TideVecClient(host, port, apiKey, timeout); }
+        public ClientBuilder tls(boolean t)    { this.tls = t;      return this; }
+        public TideVecClient build() { return new TideVecClient(host, port, apiKey, timeout, tls); }
     }
 
     public static ClientBuilder builder(String host, int port) {
@@ -226,7 +242,74 @@ public class TideVecClient implements AutoCloseable {
         post("/v1/collections/" + collection + "/delete", sb.toString());
     }
 
+    /** Start zero-downtime embedding model migration. */
+    public void startDrift(String collection, String reembedUrl) throws IOException {
+        String body = String.format("{\"reembed_url\":\"%s\"}", reembedUrl);
+        post("/v1/collections/" + collection + "/drift/start", body);
+    }
+
+    /** Poll migration progress. */
+    public DriftStatus driftStatus(String collection) throws IOException {
+        String resp = get("/v1/collections/" + collection + "/drift/status");
+        return new DriftStatus(
+            strField(resp, "collection"), strField(resp, "phase"),
+            intField(resp, "total_vectors"), intField(resp, "migrated"),
+            intField(resp, "skipped"), floatField(resp, "pct_complete"),
+            strField(resp, "error") != null ? strField(resp, "error") : ""
+        );
+    }
+
+    /** Abort an in-progress migration. */
+    public void abortDrift(String collection) throws IOException {
+        post("/v1/collections/" + collection + "/drift/abort", "{}");
+    }
+
+    /** Trigger a manual backup snapshot (requires auth). */
+    public String triggerBackup() throws IOException {
+        String resp = post("/v1/admin/backup", "{}");
+        return strField(resp, "snapshot");
+    }
+
+    /** List available backup snapshots. */
+    public List<String> listBackups() throws IOException {
+        String resp = get("/v1/admin/backups");
+        List<String> out = new ArrayList<>();
+        int idx = resp.indexOf("\"snapshots\"");
+        if (idx < 0) return out;
+        int arrStart = resp.indexOf('[', idx);
+        int arrEnd   = resp.indexOf(']', arrStart);
+        if (arrStart < 0 || arrEnd < 0) return out;
+        String arr = resp.substring(arrStart + 1, arrEnd);
+        for (String part : arr.split(",")) {
+            part = part.trim();
+            if (part.startsWith("\"") && part.endsWith("\""))
+                out.add(part.substring(1, part.length() - 1));
+        }
+        return out;
+    }
+
+    /** Restore from a snapshot (PITR). Server restart required. */
+    public String restoreBackup(String snapshot) throws IOException {
+        String body = String.format(
+            "{\"snapshot\":\"%s\",\"confirm\":true}", snapshot);
+        String resp = post("/v1/admin/restore", body);
+        return strField(resp, "message");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────
+    private String get(String path) throws IOException {
+        try {
+            HttpResponse<String> resp = http.send(
+                request("GET", path, null), HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() >= 400)
+                throw new IOException("TideVec error " + resp.statusCode() + ": " + resp.body());
+            return resp.body();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Request interrupted", e);
+        }
+    }
+
     private String post(String path, String json) throws IOException {
         try {
             HttpResponse<String> resp = http.send(
@@ -411,6 +494,10 @@ public class TideVecClient implements AutoCloseable {
                obj.charAt(end) == 'E' || obj.charAt(end) == 'e')) end++;
         try { return Float.parseFloat(obj.substring(start, end)); }
         catch (NumberFormatException e) { return 0f; }
+    }
+
+    private static int intField(String obj, String key) {
+        return (int) floatField(obj, key);
     }
 
     private static boolean boolField(String obj, String key) {

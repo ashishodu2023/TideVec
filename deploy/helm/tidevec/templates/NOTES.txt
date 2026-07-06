@@ -1,0 +1,26 @@
+TideVec has been deployed.
+
+1. Get the API URL:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}
+{{- end }}
+{{- else }}
+  kubectl port-forward svc/{{ include "tidevec.fullname" . }} 6399:{{ .Values.service.port }}
+  Then connect to http://localhost:6399
+{{- end }}
+
+2. Retrieve your API key:
+  kubectl get secret {{ include "tidevec.fullname" . }}-secret -o jsonpath='{.data.api-key}' | base64 -d
+
+3. Test health (no auth):
+  curl http://localhost:6399/health
+
+4. Test authenticated request:
+  curl -H "X-Api-Key: YOUR_KEY" http://localhost:6399/v1/collections
+
+Production features enabled:
+  Ultra-durable:  {{ .Values.config.ultraDurable }}
+  Segment store:  {{ .Values.config.segmentStore }}
+  Backups:        {{ .Values.config.backup }}
+  Auth required:  {{ .Values.config.requireAuth }}

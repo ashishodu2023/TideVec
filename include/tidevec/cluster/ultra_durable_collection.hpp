@@ -140,14 +140,40 @@ private:
 
             // Write all entries to WAL without fsync
             std::vector<uint64_t> lsns;
-            for (std::size_t bi = 0; bi < batch.size(); ++bi) {
-                uint64_t lsn = wal_->log_checkpoint();
+            for (auto& item : batch) {
+                uint64_t lsn = 0;
+                switch (item.op) {
+                case WalOp::UPSERT: {
+                    std::size_t off = 0;
+                    auto vec = deserialize_vector(item.payload.data(), off);
+                    lsn = wal_->log_upsert(vec);
+                    break;
+                }
+                case WalOp::DELETE: {
+                    std::size_t off = 0;
+                    auto id = deserialize_string(item.payload.data(), off);
+                    lsn = wal_->log_delete(id);
+                    break;
+                }
+                case WalOp::ADD_EDGE: {
+                    std::size_t off = 0;
+                    auto src = deserialize_string(item.payload.data(), off);
+                    auto tgt = deserialize_string(item.payload.data(), off);
+                    EdgeType et = static_cast<EdgeType>(item.payload[off++]);
+                    float w; std::memcpy(&w, item.payload.data() + off, 4);
+                    lsn = wal_->log_add_edge(src, tgt, et, w);
+                    break;
+                }
+                default:
+                    lsn = wal_->log_checkpoint();
+                    break;
+                }
                 lsns.push_back(lsn);
                 ++writes_batched_;
             }
 
             // One fsync for the entire batch
-            wal_->flush_to_disk();
+            wal_->fsync_to_disk();
             ++fsyncs_;
 
             // Notify all waiters
@@ -335,6 +361,30 @@ public:
     bool is_leader() const { return raft_ && raft_->leader() != nullptr; }
 
     const erasure::ReedSolomon& rs_codec() const { return rs_; }
+
+    // Delegation to underlying DurableCollection (REST server API)
+    std::size_t total_vectors() const {
+        return underlying_ ? underlying_->total_vectors() : 0;
+    }
+    std::size_t n_shards() const {
+        return underlying_ ? underlying_->n_shards() : cfg_.n_shards;
+    }
+    std::vector<CortexVector> snapshot_vectors() const {
+        return underlying_ ? underlying_->snapshot_vectors() : std::vector<CortexVector>{};
+    }
+    void swap_index(std::unique_ptr<TVIndex> idx) {
+        if (underlying_) underlying_->swap_index(std::move(idx));
+    }
+    TemporalConfig temporal_config() const { return cfg_.temporal; }
+    void set_temporal_config(const TemporalConfig& cfg) {
+        cfg_.temporal = cfg;
+        if (underlying_) underlying_->set_temporal_config(cfg);
+    }
+    uint64_t total_writes()  const { return total_writes_.load(); }
+    uint64_t total_queries() const { return total_queries_.load(); }
+    std::size_t recover() {
+        return underlying_ ? underlying_->recover() : 0;
+    }
 
 private:
     void _init_components() {

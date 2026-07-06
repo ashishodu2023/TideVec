@@ -1,0 +1,20 @@
+[
+  {
+    "id": "tenant_a",
+    "api_key": "tv_key_tenant_a_change_me",
+    "name": "Tenant A",
+    "max_collections": 50,
+    "max_vectors": 5000000,
+    "enabled": true,
+    "collection_prefixes": ["tenant_a_"]
+  },
+  {
+    "id": "tenant_b",
+    "api_key": "tv_key_tenant_b_change_me",
+    "name": "Tenant B",
+    "max_collections": 50,
+    "max_vectors": 5000000,
+    "enabled": true,
+    "collection_prefixes": ["tenant_b_"]
+  }
+]

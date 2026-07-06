@@ -161,6 +161,11 @@ public:
         tv_ = std::move(new_idx);
     }
 
+    // Wire disk-backed SegmentStore for PQ exact rescoring
+    void set_vector_store(VectorStore store) {
+        if (tv_) tv_->set_vector_store(std::move(store));
+    }
+
 private:
     Config cfg_;
     std::unique_ptr<FlatIndex>   flat_;

@@ -274,10 +274,15 @@ int main() {
     std::string data_dir = "/tmp/tidevec_api_" + std::to_string(tidevec::now_ms());
 
     RestServerConfig scfg;
-    scfg.port         = TEST_PORT;
-    scfg.threads      = 4;
-    scfg.data_dir     = data_dir;
-    scfg.log_requests = false;
+    scfg.port              = TEST_PORT;
+    scfg.threads           = 4;
+    scfg.data_dir          = data_dir;
+    scfg.log_requests      = false;
+    scfg.require_auth      = false;
+    scfg.ultra_durable     = false;
+    scfg.use_segment_store = false;
+    scfg.backup_enabled    = false;
+    scfg.device            = "cpu";
 
     RestServer server(scfg);
     g_server = &server;

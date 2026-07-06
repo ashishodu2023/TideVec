@@ -36,7 +36,10 @@
 #include <tidevec/api/httplib.h>
 #include <tidevec/api/json_serializers.hpp>
 #include <tidevec/api/collection_registry.hpp>
+#include <tidevec/api/server_security.hpp>
 #include <tidevec/drift/drift_bridge.hpp>
+#include <tidevec/observability/otel_exporter.hpp>
+#include <tidevec/ops/backup_manager.hpp>
 
 #include <string>
 #include <atomic>
@@ -96,6 +99,37 @@ struct RestServerConfig {
     std::string api_key      = "";
     std::string data_dir     = "./tidevec_data";
     bool        log_requests = true;
+    bool        require_auth = true;    // reject requests without valid API key
+
+    // TLS (requires TIDEVEC_TLS=ON at build time)
+    std::string tls_cert     = "";
+    std::string tls_key      = "";
+
+    // Durability / performance
+    bool ultra_durable       = true;
+    bool use_segment_store   = true;
+    std::string device       = "auto";  // cpu | gpu | tpu | auto
+
+    // Rate limiting
+    int rate_limit_rps       = 100;
+    int rate_limit_burst     = 200;
+
+    // SSRF allowlist (comma-separated hosts; empty = block private IPs only)
+    std::vector<std::string> reembed_allowed_hosts;
+
+    // OTel
+    std::string otel_endpoint = "";
+    bool otel_enabled         = false;
+
+    // Backup
+    bool backup_enabled       = false;
+    int  backup_interval_hours= 6;
+    std::string backup_dir    = "./backups";
+    std::string backup_s3_uri = "";
+    std::string backup_gcs_uri= "";
+
+    // Multi-tenancy
+    bool multi_tenant         = false;
 };
 
 class RestServer {
@@ -104,8 +138,15 @@ public:
 
     explicit RestServer(Config cfg = RestServerConfig{})
         : cfg_(std::move(cfg))
-        , registry_(cfg_.data_dir)
+        , registry_(_make_registry_config(cfg_))
+        , rate_limiter_(RateLimiter::Config{cfg_.rate_limit_rps, cfg_.rate_limit_burst})
+        , url_allowlist_(cfg_.reembed_allowed_hosts)
+        , tenant_store_(cfg_.data_dir)
+        , otel_(OtelConfig{cfg_.otel_endpoint, "tidevec", cfg_.otel_enabled})
+        , backup_(_make_backup_config(cfg_))
     {
+        if (!cfg_.api_key.empty())
+            tenant_store_.ensure_default_tenant(cfg_.api_key);
         _register_routes();
     }
 
@@ -116,43 +157,152 @@ public:
         std::cout << "║   http://" << cfg_.host << ":" << cfg_.port << "          ║\n";
         std::cout << "╚══════════════════════════════════════╝\n\n";
         std::cout << "Data directory: " << cfg_.data_dir << "\n";
+        std::cout << "Ultra-durable:  " << (cfg_.ultra_durable ? "ON" : "OFF") << "\n";
+        std::cout << "Segment store:  " << (cfg_.use_segment_store ? "ON" : "OFF") << "\n";
+        std::cout << "Device:         " << cfg_.device << "\n";
+        std::cout << "Auth required:  " << (cfg_.require_auth ? "YES" : "NO") << "\n";
 
-        // Recover persisted collections from WAL before accepting requests
         std::cout << "Recovering persisted collections...\n";
         registry_.load_and_recover();
         std::cout << "Ready — " << registry_.size() << " collection(s) loaded\n\n";
 
-        std::cout << "Endpoints:\n";
-        std::cout << "  GET  /health\n";
-        std::cout << "  GET  /v1/info\n";
-        std::cout << "  GET  /metrics\n";
-        std::cout << "  GET  /v1/collections\n";
-        std::cout << "  POST /v1/collections\n";
-        std::cout << "  POST /v1/collections/{name}/upsert\n";
-        std::cout << "  POST /v1/collections/{name}/search\n";
-        std::cout << "  POST /v1/collections/{name}/edges\n";
-        std::cout << "  DELETE /v1/collections/{name}\n\n";
+        backup_.start();
 
         svr_.new_task_queue = [this] {
             return new httplib::ThreadPool(cfg_.threads);
         };
+
+#ifdef TIDEVEC_TLS
+        if (!cfg_.tls_cert.empty() && !cfg_.tls_key.empty()) {
+            std::cout << "TLS enabled: " << cfg_.tls_cert << "\n";
+            svr_.listen(cfg_.host, cfg_.port, cfg_.tls_cert, cfg_.tls_key);
+        } else {
+            svr_.listen(cfg_.host, cfg_.port);
+        }
+#else
         svr_.listen(cfg_.host, cfg_.port);
+#endif
     }
 
-    void stop() { svr_.stop(); }
+    void stop() {
+        backup_.stop();
+        svr_.stop();
+    }
 
     CollectionRegistry& registry() { return registry_; }
     const ServerMetrics& metrics() const { return metrics_; }
 
 private:
+    static RegistryConfig _make_registry_config(const Config& cfg) {
+        RegistryConfig rcfg;
+        rcfg.data_dir          = cfg.data_dir;
+        rcfg.ultra_durable     = cfg.ultra_durable;
+        rcfg.use_segment_store = cfg.use_segment_store;
+        rcfg.use_accel         = (cfg.device == "gpu" || cfg.device == "tpu" ||
+                                  cfg.device == "auto");
+        rcfg.device            = _parse_device(cfg.device);
+        return rcfg;
+    }
+
+    static BackupConfig _make_backup_config(const Config& cfg) {
+        BackupConfig bcfg;
+        bcfg.data_dir       = cfg.data_dir;
+        bcfg.backup_dir     = cfg.backup_dir;
+        bcfg.interval_hours = cfg.backup_interval_hours;
+        bcfg.s3_uri         = cfg.backup_s3_uri;
+        bcfg.gcs_uri        = cfg.backup_gcs_uri;
+        bcfg.enabled        = cfg.backup_enabled;
+        return bcfg;
+    }
+
+    static accel::DeviceType _parse_device(const std::string& d) {
+        if (d == "gpu") return accel::DeviceType::GPU;
+        if (d == "tpu") return accel::DeviceType::TPU;
+        if (d == "cpu") return accel::DeviceType::CPU;
+        return accel::DeviceType::AUTO;
+    }
+
+    std::string _client_key(const httplib::Request& req) const {
+        auto it = req.headers.find("X-Api-Key");
+        if (it != req.headers.end()) return it->second;
+        return req.remote_addr;
+    }
+
+    bool _rate_limit(const httplib::Request& req, httplib::Response& res) {
+        if (!rate_limiter_.allow(_client_key(req))) {
+            res.status = 429;
+            res.set_content(err("Rate limit exceeded", 429).dump(), "application/json");
+            ++metrics_.errors_total;
+            return false;
+        }
+        return true;
+    }
+
     // ---- middleware helpers ------------------------------------
     bool _auth(const httplib::Request& req, httplib::Response& res) {
-        if (cfg_.api_key.empty()) return true;
+        // Legacy single-key mode
+        if (!cfg_.require_auth && cfg_.api_key.empty()) return true;
+
         auto it = req.headers.find("X-Api-Key");
-        if (it == req.headers.end() || it->second != cfg_.api_key) {
+        if (it == req.headers.end() || it->second.empty()) {
             res.status = 401;
-            res.set_content(err("Unauthorized", 401).dump(), "application/json");
+            res.set_content(err("Unauthorized — X-Api-Key required", 401).dump(),
+                            "application/json");
             ++metrics_.errors_total;
+            return false;
+        }
+
+        // Check tenant store first (multi-tenant)
+        if (cfg_.multi_tenant || !cfg_.api_key.empty()) {
+            std::string tenant = tenant_store_.authenticate(it->second);
+            if (!tenant.empty()) {
+                tls_current_tenant = tenant;
+                return true;
+            }
+        }
+
+        // Fallback: global API key
+        if (!cfg_.api_key.empty() && it->second == cfg_.api_key) {
+            tls_current_tenant = "default";
+            return true;
+        }
+
+        res.status = 401;
+        res.set_content(err("Unauthorized", 401).dump(), "application/json");
+        ++metrics_.errors_total;
+        return false;
+    }
+
+    bool _tenant_can_access(const std::string& collection,
+                            httplib::Response& res) {
+        if (tls_current_tenant.empty() || tls_current_tenant == "default")
+            return true;
+        if (!tenant_store_.can_access_collection(tls_current_tenant, collection)) {
+            _error(res, "Tenant not authorized for collection: " + collection, 403);
+            return false;
+        }
+        return true;
+    }
+
+    bool _tenant_check_collection_quota(httplib::Response& res) {
+        if (tls_current_tenant.empty() || tls_current_tenant == "default")
+            return true;
+        if (!tenant_store_.check_collection_quota(tls_current_tenant,
+                                                   registry_.size())) {
+            _error(res, "Collection quota exceeded for tenant", 403);
+            return false;
+        }
+        return true;
+    }
+
+    bool _tenant_check_vector_quota(std::size_t adding,
+                                    httplib::Response& res) {
+        if (tls_current_tenant.empty() || tls_current_tenant == "default")
+            return true;
+        if (!tenant_store_.check_vector_quota(tls_current_tenant,
+                                               registry_.total_vectors(),
+                                               adding)) {
+            _error(res, "Vector quota exceeded for tenant", 403);
             return false;
         }
         return true;
@@ -192,6 +342,12 @@ private:
                 {"status", "ok"},
                 {"version", "0.2.0"},
                 {"collections", registry_.size()},
+                {"ultra_durable", cfg_.ultra_durable},
+                {"segment_store", cfg_.use_segment_store},
+                {"device", cfg_.device},
+                {"auth_required", cfg_.require_auth},
+                {"multi_tenant", cfg_.multi_tenant},
+                {"backup_enabled", cfg_.backup_enabled},
                 {"timestamp_ms", now_ms()}
             });
         });
@@ -205,8 +361,21 @@ private:
                 {"name", "TideVec"},
                 {"version", "0.2.0"},
                 {"description", "Temporally-aware causal vector database"},
-                {"features", json::array({"TVIndex", "CausalEdge",
-                    "DriftBridge", "AgentContext", "RetrievalTrace"})},
+                {"features", json::array({
+                    "TVIndex", "CausalEdge", "DriftBridge",
+                    "RetrievalTrace", "UltraDurable", "SegmentStore",
+                    "MultiTenant", "AutomatedBackup", "RateLimiting", "OTel"
+                })},
+                {"production", {
+                    {"ultra_durable",    cfg_.ultra_durable},
+                    {"segment_store",    cfg_.use_segment_store},
+                    {"device",           cfg_.device},
+                    {"auth_required",    cfg_.require_auth},
+                    {"multi_tenant",     cfg_.multi_tenant},
+                    {"backup_enabled",   cfg_.backup_enabled},
+                    {"otel_enabled",     cfg_.otel_enabled},
+                    {"rate_limit_rps",   cfg_.rate_limit_rps},
+                }},
                 {"collections", registry_.size()}
             });
         });
@@ -235,7 +404,8 @@ private:
                     {"n_shards",   info.n_shards},
                     {"dim",        info.dim},
                     {"index_type", info.index_type},
-                    {"metric",     info.metric}
+                    {"metric",     info.metric},
+                    {"backend",    info.backend}
                 });
             }
             _json_response(res, ok(arr));
@@ -253,6 +423,8 @@ private:
                 auto j = json::parse(req.body);
                 CollectionRegistry::CreateParams p;
                 p.name        = j.at("name").get<std::string>();
+                if (!_tenant_check_collection_quota(res)) return;
+                if (!_tenant_can_access(p.name, res)) return;
                 p.dim         = j.value("dim",         768UL);
                 p.index_type  = j.value("index_type",  std::string("tvindex"));
                 p.metric      = j.value("metric",      std::string("cosine"));
@@ -265,6 +437,8 @@ private:
                     p.temporal = temporal_cfg_from_json(j["temporal"]);
 
                 registry_.create(p);
+                otel_.export_event("info", "Collection created",
+                    {{"name", p.name}, {"tenant", tls_current_tenant}});
                 _json_response(res, ok({{"name", p.name},
                     {"message","Collection created"}}), 201);
             } catch (const std::exception& e) {
@@ -287,7 +461,8 @@ private:
                     {"n_vectors",     col.total_vectors()},
                     {"n_shards",      col.n_shards()},
                     {"total_writes",  col.total_writes()},
-                    {"total_queries", col.total_queries()}
+                    {"total_queries", col.total_queries()},
+                    {"backend",       col.backend_name()}
                 }));
             } catch (const std::exception& e) {
                 _error(res, e.what(), 404);
@@ -317,11 +492,17 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) {
             ++metrics_.requests_total;
             ++metrics_.upsert_requests;
+            if (!_rate_limit(req, res)) return;
             if (!_auth(req, res)) return;
             std::string name = req.matches[1];
+            if (!_tenant_can_access(name, res)) return;
             try {
                 auto& col = registry_.get(name);
                 auto j = json::parse(req.body);
+
+                std::size_t n_vectors = j.contains("vectors")
+                    ? j["vectors"].size() : 1;
+                if (!_tenant_check_vector_quota(n_vectors, res)) return;
 
                 std::vector<std::string> inserted_ids;
                 auto process = [&](const json& item) {
@@ -384,8 +565,10 @@ private:
             [this](const httplib::Request& req, httplib::Response& res) {
             ++metrics_.requests_total;
             ++metrics_.search_requests;
+            if (!_rate_limit(req, res)) return;
             if (!_auth(req, res)) return;
             std::string name = req.matches[1];
+            if (!_tenant_can_access(name, res)) return;
             try {
                 auto& col = registry_.get(name);
                 auto j = json::parse(req.body);
@@ -406,6 +589,16 @@ private:
                                {"count",   results.size()}});
                 if (opts.include_trace)
                     resp["data"]["trace"] = trace_to_json(trace);
+
+                // Always emit structured log; export OTel when trace requested
+                if (opts.include_trace) {
+                    if (otel_.enabled()) otel_.export_trace(trace);
+                } else if (otel_.enabled()) {
+                    otel_.export_event("info", "search",
+                        {{"collection", name},
+                         {"count", results.size()},
+                         {"tenant", tls_current_tenant}});
+                }
 
                 _json_response(res, resp);
             } catch (const std::exception& e) {
@@ -488,6 +681,14 @@ private:
                 if (reembed_url.empty()) {
                     _error(res, "reembed_url is required — "
                            "POST {\"id\":...,\"payload\":...} → {\"embedding\":[...]}");
+                    return;
+                }
+
+                // SSRF protection
+                if (UrlAllowlist::_is_blocked_url(reembed_url) ||
+                    !url_allowlist_.is_allowed(reembed_url)) {
+                    _error(res, "reembed_url not allowed — must be a public "
+                           "http(s) URL on the allowlist", 403);
                     return;
                 }
 
@@ -641,6 +842,84 @@ private:
         });
 
         // --------------------------------------------------------
+        // POST /v1/admin/backup — trigger manual snapshot
+        // --------------------------------------------------------
+        svr_.Post("/v1/admin/backup", [this](const httplib::Request& req,
+                                              httplib::Response& res) {
+            ++metrics_.requests_total;
+            if (!_auth(req, res)) return;
+            try {
+                auto name = backup_.snapshot_now();
+                otel_.export_event("info", "Manual backup triggered",
+                    {{"snapshot", name}});
+                _json_response(res, ok({{"snapshot", name},
+                    {"message", "Backup created"}}));
+            } catch (const std::exception& e) {
+                _error(res, e.what(), 500);
+            }
+        });
+
+        // --------------------------------------------------------
+        // GET /v1/admin/backups — list snapshots
+        // --------------------------------------------------------
+        svr_.Get("/v1/admin/backups", [this](const httplib::Request& req,
+                                             httplib::Response& res) {
+            ++metrics_.requests_total;
+            if (!_auth(req, res)) return;
+            auto snaps = backup_.list_snapshots();
+            _json_response(res, ok({{"snapshots", snaps}}));
+        });
+
+        // --------------------------------------------------------
+        // GET /v1/admin/backups/manifests — PITR manifest history
+        // --------------------------------------------------------
+        svr_.Get("/v1/admin/backups/manifests", [this](const httplib::Request& req,
+                                                        httplib::Response& res) {
+            ++metrics_.requests_total;
+            if (!_auth(req, res)) return;
+            json arr = json::array();
+            for (const auto& m : backup_.list_manifests()) {
+                json entry = {
+                    {"snapshot", m.snapshot},
+                    {"created_at", m.created_at},
+                    {"data_dir", m.data_dir},
+                };
+                if (!m.s3_uri.empty()) entry["s3_uri"] = m.s3_uri;
+                if (!m.gcs_uri.empty()) entry["gcs_uri"] = m.gcs_uri;
+                arr.push_back(entry);
+            }
+            _json_response(res, ok({{"manifests", arr}}));
+        });
+
+        // --------------------------------------------------------
+        // POST /v1/admin/restore — point-in-time recovery
+        // Body: {"snapshot":"tidevec_123.tar.gz","confirm":true}
+        // --------------------------------------------------------
+        svr_.Post("/v1/admin/restore", [this](const httplib::Request& req,
+                                               httplib::Response& res) {
+            ++metrics_.requests_total;
+            if (!_auth(req, res)) return;
+            try {
+                auto j = json::parse(req.body);
+                if (!j.value("confirm", false)) {
+                    _error(res, "Restore requires {\"confirm\": true}", 400);
+                    return;
+                }
+                std::string snap = j.at("snapshot").get<std::string>();
+                auto msg = backup_.restore_snapshot(snap);
+                otel_.export_event("warn", "Backup restored",
+                    {{"snapshot", snap}});
+                _json_response(res, ok({
+                    {"snapshot", snap},
+                    {"message", msg},
+                    {"restart_required", true},
+                }));
+            } catch (const std::exception& e) {
+                _error(res, e.what(), 500);
+            }
+        });
+
+        // --------------------------------------------------------
         // Catch-all 404
         // --------------------------------------------------------
         svr_.set_error_handler([this](const httplib::Request&,
@@ -664,6 +943,13 @@ private:
     CollectionRegistry  registry_;
     ServerMetrics       metrics_;
     httplib::Server     svr_;
+    RateLimiter         rate_limiter_;
+    UrlAllowlist        url_allowlist_;
+    TenantStore         tenant_store_;
+    OtelExporter        otel_;
+    BackupManager       backup_;
+
+    inline static thread_local std::string tls_current_tenant;
 
     // DriftBridge state — one per collection currently migrating
     std::mutex drift_mutex_;

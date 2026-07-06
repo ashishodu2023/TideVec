@@ -1,0 +1,65 @@
+# Default values for TideVec
+replicaCount: 1
+
+image:
+  repository: averm004/tidevec
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 6399
+
+ingress:
+  enabled: false
+  className: nginx
+  tls: []
+  hosts:
+    - host: tidevec.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 4Gi
+  limits:
+    cpu: "8"
+    memory: 16Gi
+
+persistence:
+  enabled: true
+  size: 100Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+config:
+  threads: 8
+  device: auto
+  requireAuth: true
+  ultraDurable: true
+  segmentStore: true
+  backup: true
+  backupIntervalHours: 6
+  rateLimitRps: 100
+  otelEnabled: true
+  otelEndpoint: ""
+
+secrets:
+  # Set via --set secrets.apiKey=yourkey or external secret
+  apiKey: ""
+
+backup:
+  s3Uri: ""
+  gcsUri: ""
+
+monitoring:
+  prometheus:
+    enabled: false
+  jaeger:
+    enabled: false
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

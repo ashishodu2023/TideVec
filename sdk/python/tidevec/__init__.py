@@ -6,7 +6,14 @@ from .client import (
     SearchHit,
     SearchResponse,
     CollectionInfo,
+    DriftStatus,
     HalfLife,
+    TideVecError,
+    UnauthorizedError,
+    ForbiddenError,
+    RateLimitError,
+    CollectionNotFoundError,
+    APIError,
 )
 
 __version__ = "0.2.0"
@@ -16,5 +23,12 @@ __all__ = [
     "SearchHit",
     "SearchResponse",
     "CollectionInfo",
+    "DriftStatus",
     "HalfLife",
+    "TideVecError",
+    "UnauthorizedError",
+    "ForbiddenError",
+    "RateLimitError",
+    "CollectionNotFoundError",
+    "APIError",
 ]

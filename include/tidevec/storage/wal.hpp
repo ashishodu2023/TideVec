@@ -23,6 +23,15 @@
 #include <filesystem>
 #include <functional>
 #include <stdexcept>
+#include <iostream>
+
+#ifdef _WIN32
+#include <io.h>
+#include <fcntl.h>
+#else
+#include <unistd.h>
+#include <fcntl.h>
+#endif
 
 namespace tidevec {
 namespace fs = std::filesystem;
@@ -163,7 +172,9 @@ inline CortexVector deserialize_vector(const uint8_t* p, std::size_t& off) {
 struct WalConfig {
     std::string dir            = "./wal";
     uint64_t max_segment_bytes = 256ULL * 1024 * 1024;
-    bool     sync_on_write     = true;
+    bool     sync_on_write     = true;   // flush + fsync each write
+    bool     halt_on_corruption= false;  // true = throw on bad CRC during replay
+    bool     use_group_commit  = false;  // defer fsync to WalGroupCommit
 };
 
 class WriteAheadLog {
@@ -203,7 +214,16 @@ public:
         return _write(WalOp::ADD_EDGE, payload);
     }
 
-    void flush_to_disk() { std::lock_guard lock(mutex_); file_.flush(); }
+    void flush_to_disk() {
+        std::lock_guard lock(mutex_);
+        file_.flush();
+    }
+
+    // Durably sync WAL to persistent storage (fsync/fdatasync)
+    void fsync_to_disk() {
+        std::lock_guard lock(mutex_);
+        _fsync_locked();
+    }
 
     uint64_t log_checkpoint() {
         return _write(WalOp::CHECKPOINT, {});
@@ -221,7 +241,7 @@ public:
             std::ifstream f(seg, std::ios::binary);
             if (!f) continue;
             WalRecord rec;
-            while (_read_record(f, rec)) fn(rec);
+            while (_read_record(f, rec, cfg_.halt_on_corruption)) fn(rec);
         }
     }
 
@@ -273,12 +293,30 @@ private:
             file_.write(reinterpret_cast<const char*>(payload.data()),
                         payload.size());
 
-        if (cfg_.sync_on_write) file_.flush();
+        if (cfg_.sync_on_write && !cfg_.use_group_commit) {
+            file_.flush();
+            _fsync_locked();
+        } else if (cfg_.sync_on_write) {
+            file_.flush();
+        }
         bytes_written_ += sizeof(hdr) + payload.size();
         return lsn_;
     }
 
-    static bool _read_record(std::ifstream& f, WalRecord& rec) {
+    void _fsync_locked() {
+        if (!file_.is_open() || current_seg_path_.empty()) return;
+        file_.flush();
+#ifdef _WIN32
+        int fd = ::open(current_seg_path_.c_str(), O_RDONLY);
+        if (fd >= 0) { ::_commit(fd); ::close(fd); }
+#else
+        int fd = ::open(current_seg_path_.c_str(), O_RDONLY);
+        if (fd >= 0) { ::fsync(fd); ::close(fd); }
+#endif
+    }
+
+    static bool _read_record(std::ifstream& f, WalRecord& rec,
+                             bool halt_on_corruption = false) {
         f.read(reinterpret_cast<char*>(&rec.header), sizeof(WalHeader));
         if (!f || f.gcount() < static_cast<std::streamsize>(sizeof(WalHeader)))
             return false;
@@ -296,7 +334,17 @@ private:
         if (!rec.payload.empty())
             std::memcpy(crc_data.data() + sizeof(WalHeader),
                         rec.payload.data(), rec.payload.size());
-        // (CRC validation: skip corrupt records)
+        uint32_t computed = crc32_simple(crc_data.data(),
+            sizeof(WalHeader) - 4 + rec.payload.size());
+        if (computed != rec.header.crc32) {
+            std::cerr << "[wal] CRC mismatch at LSN " << rec.header.lsn
+                      << " (expected " << rec.header.crc32
+                      << ", got " << computed << ")\n";
+            if (halt_on_corruption)
+                throw std::runtime_error("WAL corruption at LSN " +
+                    std::to_string(rec.header.lsn));
+            return false;  // skip corrupt record
+        }
         return true;
     }
 

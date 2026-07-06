@@ -510,63 +510,78 @@ Single proto source of truth → compiled to all four languages.
 pip install tidevec
 ```
 ```python
-from tidevec import TideVec, HalfLife
+import os
+from tidevec import TideVec, HalfLife, RateLimitError
 
-db = TideVec("localhost:6399")
+db = TideVec("localhost:6399", api_key=os.environ["TIDEVEC_API_KEY"])
+
 db.create_collection("docs", dim=768, half_life_ms=HalfLife.ONE_WEEK)
-db.upsert("docs", [{"id":"v1","embedding":[...],"payload":{"src":"wiki"},
-    "edges":[{"target_id":"v0","type":"UPDATES","weight":0.95}]}])
+db.upsert("docs", [{"id":"v1","embedding":[...],"payload":{"src":"wiki"}}])
 
-results = db.search("docs", query, top_k=10, temporal_blend=0.3,
-    mode="causal_expand", include_trace=True)
+results = db.search("docs", query, top_k=10, include_trace=True)
 for hit in results:
     print(f"{hit.id}  score={hit.score:.4f}  temporal={hit.temporal_score:.3f}")
-    if hit.staleness_warning: print(f"  ⚠  {hit.staleness_reason}")
+
+# DriftBridge — zero-downtime model migration
+db.start_drift("docs", reembed_url="https://embed.example.com/v1/embed")
+print(db.drift_status("docs"))
+
+# Admin — backups
+snapshot = db.trigger_backup()
+print(db.list_backups())
+
+# Handles rate limits automatically (retries with backoff)
+try:
+    db.search("docs", query)
+except RateLimitError:
+    pass
 ```
 
 ### Go
 ```go
-db, _ := tidevec.New("localhost:6399")
+db, _ := tidevec.New("localhost:6399", tidevec.ClientConfig{
+    APIKey: os.Getenv("TIDEVEC_API_KEY"),
+    TLS:    true,
+})
 defer db.Close()
-db.CreateCollection(ctx, tidevec.CollectionConfig{
-    Name: "docs", Dim: 768, HalfLifeMs: tidevec.HalfLifeOneWeek,
-})
-resp, _ := db.Search(ctx, "docs", tidevec.SearchRequest{
-    Vector: query, TopK: 10, Mode: tidevec.ModeCausalExpand,
-    Device: tidevec.DeviceGPU,
-})
+
+db.CreateCollection(ctx, tidevec.CollectionConfig{Name: "docs", Dim: 768})
+db.Upsert(ctx, "docs", vectors)
+resp, _ := db.Search(ctx, "docs", query, tidevec.SearchOptions{TopK: 10})
+
+// DriftBridge + backups
+db.StartDrift(ctx, "docs", "https://embed.example.com/v1/embed")
+status, _ := db.DriftStatus(ctx, "docs")
+snapshot, _ := db.TriggerBackup(ctx)
 ```
 
 ### Java
 ```java
-try (TideVecClient db = TideVecClient.builder("localhost", 6399).build()) {
-    db.createCollection(CollectionConfig.builder("docs")
-        .dim(768).halfLifeMs(HalfLife.ONE_WEEK).build());
-    SearchResponse r = db.search("docs",
-        SearchRequest.builder(query).topK(10)
-            .mode(QueryMode.CAUSAL_EXPAND)
-            .includeStalenessWarnings(true).build());
+try (TideVecClient db = TideVecClient.builder("localhost", 6399)
+        .apiKey(System.getenv("TIDEVEC_API_KEY"))
+        .tls(true)
+        .build()) {
+    db.createCollection(CollectionConfig.builder("docs").dim(768).build());
+    db.upsert("docs", vectors);
+    SearchResponse r = db.search("docs", query, SearchOptions.builder().topK(10).build());
+
+    db.startDrift("docs", "https://embed.example.com/v1/embed");
+    DriftStatus status = db.driftStatus("docs");
+    String snapshot = db.triggerBackup();
 }
 ```
 
 ### C++ (native)
 ```cpp
-#include <tidevec/accelerator/accelerated_collection.hpp>
+#include <tidevec/client.hpp>
 
-tidevec::AcceleratedCollection::Config cfg;
-cfg.durable.name = "docs"; cfg.durable.dim = 768;
-cfg.durable.temporal.half_life_ms = 604'800'000;
-cfg.accel.preferred = tidevec::accel::DeviceType::GPU;
-tidevec::AcceleratedCollection db(cfg);
+tidevec::TideVec db("localhost:6399", {.api_key = std::getenv("TIDEVEC_API_KEY")});
+db.create_collection({.name = "docs", .dim = 768});
+db.upsert("docs", vectors);
+auto results = db.search("docs", query);
 
-tidevec::CortexVector v("v1", embedding);
-v.add_edge("v0", tidevec::EdgeType::UPDATES, 0.95f);
-db.upsert(v);
-
-tidevec::QueryOptions opts;
-opts.top_k = 10; opts.temporal_blend = 0.3f;
-opts.mode  = tidevec::QueryMode::CAUSAL_EXPAND;
-auto results = db.search(query_embedding, opts);
+db.start_drift("docs", "https://embed.example.com/v1/embed");
+db.trigger_backup();
 ```
 
 ---
@@ -574,18 +589,24 @@ auto results = db.search(query_embedding, opts);
 ## Quick Start
 
 ```bash
-# Docker (any machine)
-docker run -p 6399:6399 ghcr.io/ashishodu2023/TideVec:latest-cpu
+# Docker — auth enabled by default (API key auto-generated if unset)
+export TIDEVEC_API_KEY="your-secret-key"
+docker run -p 6399:6399 \
+  -e TIDEVEC_API_KEY \
+  -v $(pwd)/data:/data \
+  averm004/tidevec:latest
 
-# GPU (NVIDIA, requires nvidia-container-toolkit)
-docker run --gpus all -p 6399:6399 ghcr.io/ashishodu2023/TideVec:latest-gpu
-
-# Full observability stack
-docker compose -f docker/docker-compose.yml up
-# TideVec   → http://localhost:6399
+# Full production stack (auth + backups + observability)
+docker compose -f docker/docker-compose.yml --profile monitoring up -d
+# TideVec   → http://localhost:6399  (requires X-Api-Key header)
 # Prometheus → http://localhost:9090
 # Grafana    → http://localhost:3000
 # Jaeger     → http://localhost:16686
+
+# Kubernetes (Helm)
+helm install tidevec deploy/helm/tidevec \
+  --set secrets.apiKey=your-secret-key \
+  --set persistence.size=100Gi
 ```
 
 ```bash
@@ -607,28 +628,188 @@ make -j$(nproc)
 ./tidevec_api_tests && ./tidevec_accel_tests && \
 ./tidevec_eleven_nines_tests
 
-# Start server
-./tidevec-server --host 0.0.0.0 --port 6399 --device auto
+# Start server (production defaults)
+./tidevec-server \
+  --host 0.0.0.0 --port 6399 \
+  --require-auth --api-key "$TIDEVEC_API_KEY" \
+  --ultra-durable --segment-store \
+  --device auto --backup --otel
 ```
+
+---
+
+## Production Deployment
+
+TideVec v0.2 ships with production-hardening enabled by default in Docker and Helm.
+
+### Server features
+
+| Feature | Default (Docker) | Flag / Env |
+|---------|------------------|------------|
+| **Auth required** | ON | `--require-auth`, `TIDEVEC_API_KEY` |
+| **Ultra-durable** (Raft + RS + health monitor) | ON | `--ultra-durable` |
+| **Segment store** (disk-backed vectors) | ON | `--segment-store` |
+| **Automated backups** | ON (compose) | `--backup`, `TIDEVEC_BACKUP=1` |
+| **Rate limiting** | 100 rps / burst 200 | `--rate-limit N` |
+| **OTel trace export** | ON (with monitoring profile) | `--otel --otel-endpoint URL` |
+| **TLS** | nginx sidecar or native | `--tls-cert/--tls-key` or `docker compose --profile tls` |
+| **Multi-tenancy** | OFF | `--multi-tenant` + `tenants.json` |
+
+### Authentication
+
+All `/v1/*` routes require an `X-Api-Key` header when auth is enabled (default in Docker).
+
+```bash
+curl -H "X-Api-Key: $TIDEVEC_API_KEY" \
+  http://localhost:6399/v1/collections
+```
+
+SDKs read `TIDEVEC_API_KEY` from the environment automatically:
+
+```python
+import os
+from tidevec import TideVec
+
+db = TideVec("localhost:6399", api_key=os.environ["TIDEVEC_API_KEY"])
+# or: db = TideVec("localhost:6399")  # reads TIDEVEC_API_KEY env var
+```
+
+### Multi-tenancy
+
+Place `tenants.json` in the data directory (see `deploy/tenants.example.json`):
+
+```json
+[
+  {
+    "id": "tenant_a",
+    "api_key": "tv_key_tenant_a",
+    "max_collections": 50,
+    "max_vectors": 5000000,
+    "collection_prefixes": ["tenant_a_"]
+  }
+]
+```
+
+Start with `--multi-tenant`. Each tenant's API key grants access only to collections matching their prefix.
+
+### Backups & point-in-time recovery
+
+Automated snapshots run every 6 hours (configurable). Upload to object storage:
+
+```bash
+./tidevec-server --backup \
+  --backup-s3 s3://my-bucket/tidevec/ \
+  --backup-gcs gs://my-bucket/tidevec/
+```
+
+Manual trigger via SDK or REST:
+
+```python
+snapshot = db.trigger_backup()       # e.g. "tidevec_1712345678.tar.gz"
+backups  = db.list_backups()
+```
+
+Restore: stop server → extract tarball over data dir → restart (WAL replay restores state).
+
+```python
+# List PITR manifest history
+for m in db.list_backup_manifests():
+    print(m["snapshot"], m["created_at"])
+
+# Restore to a point in time (creates safety snapshot first)
+result = db.restore_backup("tidevec_1712345678.tar.gz")
+print(result["message"])  # restart server after restore
+```
+
+### DriftBridge (model migration)
+
+Zero-downtime embedding model upgrade:
+
+```python
+db.start_drift("docs", reembed_url="https://embed.example.com/v1/embed")
+while True:
+    status = db.drift_status("docs")
+    print(f"{status.phase}: {status.pct_complete:.0f}%")
+    if status.phase in ("COMPLETE", "IDLE", "FAILED"):
+        break
+    time.sleep(5)
+```
+
+The `reembed_url` must be on the server allowlist (`--reembed-allow embed.example.com`). Private IPs and cloud metadata endpoints are always blocked.
+
+### TLS
+
+**Option A — nginx reverse proxy** (recommended):
+
+```bash
+docker compose --profile tls up -d
+# Place certs in docker/nginx/certs/tidevec.crt + tidevec.key
+# Clients connect to https://tidevec.local:443
+```
+
+**Option B — native TLS** (build with OpenSSL):
+
+```bash
+cmake -DTIDEVEC_TLS=ON ..
+./tidevec-server --tls-cert cert.pem --tls-key key.pem
+```
+
+### Kubernetes
+
+```bash
+helm install tidevec deploy/helm/tidevec \
+  --set secrets.apiKey=your-key \
+  --set config.ultraDurable=true \
+  --set config.backup=true \
+  --set persistence.size=100Gi \
+  --set backup.s3Uri=s3://my-bucket/tidevec/
+```
+
+The chart deploys a StatefulSet with persistent volumes, liveness/readiness probes, and a Secret for the API key.
 
 ---
 
 ## REST API
 
 ```
-GET  /health                                  Server status, GPU/TPU flags
-GET  /v1/info                                 Feature manifest
-GET  /metrics                                 Prometheus text format
-GET  /v1/collections                          List all collections
-POST /v1/collections                          Create collection
-GET  /v1/collections/{name}                   Stats
-DELETE /v1/collections/{name}                 Drop
-POST /v1/collections/{name}/upsert            Upsert 1..N vectors (batch)
-POST /v1/collections/{name}/delete            Delete by ID list
-POST /v1/collections/{name}/search            Search (ANN + temporal + trace)
-POST /v1/collections/{name}/edges             Add causal edges
-PUT  /v1/collections/{name}/temporal          Update decay config
+GET  /health                                  Server status (no auth)
+GET  /v1/info                                 Feature manifest (no auth)
+GET  /metrics                                 Prometheus metrics (no auth)
+
+GET  /v1/collections                          List collections          [auth]
+POST /v1/collections                          Create collection         [auth]
+GET  /v1/collections/{name}                   Collection stats          [auth]
+DELETE /v1/collections/{name}                 Drop collection           [auth]
+POST /v1/collections/{name}/upsert            Upsert vectors            [auth, rate-limited]
+POST /v1/collections/{name}/delete            Delete by ID              [auth]
+POST /v1/collections/{name}/search            Search                    [auth, rate-limited]
+POST /v1/collections/{name}/edges             Add causal edges          [auth]
+PUT  /v1/collections/{name}/temporal          Update decay config       [auth]
+
+POST /v1/collections/{name}/drift/start       Start model migration     [auth]
+GET  /v1/collections/{name}/drift/status      Migration progress        [auth]
+POST /v1/collections/{name}/drift/abort       Abort migration           [auth]
+
+POST /v1/admin/backup                         Trigger snapshot          [auth]
+GET  /v1/admin/backups                        List snapshots            [auth]
+GET  /v1/admin/backups/manifests              PITR manifest history     [auth]
+POST /v1/admin/restore                        Restore from snapshot     [auth]
 ```
+
+**Error codes:** `401` Unauthorized · `403` Forbidden (tenant/SSRF/quota) · `429` Rate limit exceeded
+
+### P1 production stack (v0.2)
+
+| Component | Implementation |
+|-----------|----------------|
+| **UltraDurableCollection** | Raft + RS(10,4) + health monitor wired via `--ultra-durable` |
+| **SegmentStore** | Disk-backed `.cvec` segments; TVIndex PQ rescoring via mmap |
+| **AcceleratedCollection** | `--device auto\|gpu\|tpu` dispatches GPU/TPU search path |
+| **Multi-tenancy** | `tenants.json` + per-tenant API keys, collection prefixes, quotas |
+| **Automated backups** | Periodic tar.gz + optional S3/GCS upload |
+| **Point-in-time recovery** | `manifests.jsonl` history + `POST /v1/admin/restore` |
+| **Structured logging + OTel** | JSON logs on every search; OTLP export when `--otel` enabled |
+| **Kubernetes** | Helm StatefulSet + PVC + Ingress + Secret-managed API key |
 
 ---
 

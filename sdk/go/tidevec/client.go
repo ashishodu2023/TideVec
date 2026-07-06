@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -115,8 +116,31 @@ type apiEnvelope struct {
 // ClientConfig holds optional settings for the HTTP client.
 type ClientConfig struct {
 	APIKey     string
+	TLS        bool   // use https:// instead of http://
 	TimeoutMs  int
 	MaxRetries int
+}
+
+// DriftStatus reports zero-downtime model migration progress.
+type DriftStatus struct {
+	Collection    string  `json:"collection"`
+	Phase         string  `json:"phase"`
+	TotalVectors  int     `json:"total_vectors"`
+	Migrated      int     `json:"migrated"`
+	Skipped       int     `json:"skipped"`
+	PctComplete   float64 `json:"pct_complete"`
+	Error         string  `json:"error"`
+}
+
+// CollectionInfo describes a collection on the server.
+type CollectionInfo struct {
+	Name      string `json:"name"`
+	NVectors  int    `json:"n_vectors"`
+	NShards   int    `json:"n_shards"`
+	Dim       int    `json:"dim"`
+	IndexType string `json:"index_type"`
+	Metric    string `json:"metric"`
+	Backend   string `json:"backend"`
 }
 
 // Client is a TideVec REST client.
@@ -128,23 +152,33 @@ type Client struct {
 }
 
 // New creates a TideVec client connected to the given host:port.
+// APIKey falls back to TIDEVEC_API_KEY env var if not set in config.
 func New(hostPort string, cfg ...ClientConfig) (*Client, error) {
 	timeout := 30 * time.Second
-	apiKey := ""
+	apiKey := os.Getenv("TIDEVEC_API_KEY")
+	useTLS := false
 	maxRetries := 3
 
 	if len(cfg) > 0 {
 		if cfg[0].TimeoutMs > 0 {
 			timeout = time.Duration(cfg[0].TimeoutMs) * time.Millisecond
 		}
-		apiKey = cfg[0].APIKey
+		if cfg[0].APIKey != "" {
+			apiKey = cfg[0].APIKey
+		}
+		useTLS = cfg[0].TLS
 		if cfg[0].MaxRetries > 0 {
 			maxRetries = cfg[0].MaxRetries
 		}
 	}
 
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
+
 	c := &Client{
-		baseURL:    "http://" + hostPort,
+		baseURL:    scheme + "://" + hostPort,
 		httpClient: &http.Client{Timeout: timeout},
 		apiKey:     apiKey,
 		maxRetries: maxRetries,
@@ -284,6 +318,160 @@ func (c *Client) DeleteVectors(ctx context.Context, collection string, ids []str
 	return err
 }
 
+// Info returns server metadata from GET /v1/info.
+func (c *Client) Info(ctx context.Context) (map[string]interface{}, error) {
+	raw, err := c.getJSON(ctx, "/v1/info")
+	if err != nil {
+		return nil, err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// ListCollections returns all collections on the server.
+func (c *Client) ListCollections(ctx context.Context) ([]CollectionInfo, error) {
+	raw, err := c.getJSON(ctx, "/v1/collections")
+	if err != nil {
+		return nil, err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	var list []CollectionInfo
+	if err := json.Unmarshal(env.Data, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// StartDrift begins a zero-downtime embedding model migration.
+func (c *Client) StartDrift(ctx context.Context, collection, reembedURL string) error {
+	body := map[string]interface{}{
+		"reembed_url": reembedURL,
+	}
+	_, err := c.postJSON(ctx, "/v1/collections/"+collection+"/drift/start", body)
+	return err
+}
+
+// DriftStatus polls migration progress.
+func (c *Client) DriftStatus(ctx context.Context, collection string) (*DriftStatus, error) {
+	raw, err := c.getJSON(ctx, "/v1/collections/"+collection+"/drift/status")
+	if err != nil {
+		return nil, err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	var status DriftStatus
+	if err := json.Unmarshal(env.Data, &status); err != nil {
+		return nil, err
+	}
+	return &status, nil
+}
+
+// AbortDrift cancels an in-progress migration.
+func (c *Client) AbortDrift(ctx context.Context, collection string) error {
+	_, err := c.postJSON(ctx, "/v1/collections/"+collection+"/drift/abort", map[string]interface{}{})
+	return err
+}
+
+// TriggerBackup creates a manual snapshot (requires auth).
+func (c *Client) TriggerBackup(ctx context.Context) (string, error) {
+	raw, err := c.postJSON(ctx, "/v1/admin/backup", map[string]interface{}{})
+	if err != nil {
+		return "", err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return "", err
+	}
+	var data struct {
+		Snapshot string `json:"snapshot"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return "", err
+	}
+	return data.Snapshot, nil
+}
+
+// ListBackups returns available snapshot filenames.
+func (c *Client) ListBackups(ctx context.Context) ([]string, error) {
+	raw, err := c.getJSON(ctx, "/v1/admin/backups")
+	if err != nil {
+		return nil, err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	var data struct {
+		Snapshots []string `json:"snapshots"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return nil, err
+	}
+	return data.Snapshots, nil
+}
+
+// BackupManifest is a point-in-time recovery record.
+type BackupManifest struct {
+	Snapshot  string `json:"snapshot"`
+	CreatedAt int64  `json:"created_at"`
+	DataDir   string `json:"data_dir"`
+	S3URI     string `json:"s3_uri"`
+	GCSURI    string `json:"gcs_uri"`
+}
+
+// ListBackupManifests returns PITR manifest history.
+func (c *Client) ListBackupManifests(ctx context.Context) ([]BackupManifest, error) {
+	raw, err := c.getJSON(ctx, "/v1/admin/backups/manifests")
+	if err != nil {
+		return nil, err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	var data struct {
+		Manifests []BackupManifest `json:"manifests"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return nil, err
+	}
+	return data.Manifests, nil
+}
+
+// RestoreBackup restores from a snapshot. Server restart required.
+func (c *Client) RestoreBackup(ctx context.Context, snapshot string) (string, error) {
+	raw, err := c.postJSON(ctx, "/v1/admin/restore", map[string]interface{}{
+		"snapshot": snapshot,
+		"confirm":  true,
+	})
+	if err != nil {
+		return "", err
+	}
+	var env apiEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return "", err
+	}
+	var data struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return "", err
+	}
+	return data.Message, nil
+}
+
 // --- internal helpers ---
 
 func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
@@ -297,14 +485,53 @@ func (c *Client) get(ctx context.Context, path string) (*http.Response, error) {
 	return c.httpClient.Do(req)
 }
 
+func (c *Client) getJSON(ctx context.Context, path string) ([]byte, error) {
+	resp, err := c.get(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("tidevec: server error %d: %s", resp.StatusCode, string(data))
+	}
+	return data, nil
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, payload interface{}) ([]byte, error) {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("tidevec: marshal error: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(b))
+
+	var lastErr error
+	for attempt := 0; attempt <= c.maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(min(attempt*attempt, 8)) * time.Second)
+		}
+		data, status, err := c.doPost(ctx, path, b)
+		if err != nil {
+			return nil, err
+		}
+		if status == http.StatusTooManyRequests {
+			lastErr = fmt.Errorf("tidevec: rate limit exceeded (429)")
+			continue
+		}
+		if status >= 400 {
+			return nil, fmt.Errorf("tidevec: server error %d: %s", status, string(data))
+		}
+		return data, nil
+	}
+	return nil, lastErr
+}
+
+func (c *Client) doPost(ctx context.Context, path string, body []byte) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -313,16 +540,13 @@ func (c *Client) postJSON(ctx context.Context, path string, payload interface{})
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("tidevec: request failed: %w", err)
+		return nil, 0, fmt.Errorf("tidevec: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("tidevec: read response: %w", err)
+		return nil, resp.StatusCode, fmt.Errorf("tidevec: read response: %w", err)
 	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("tidevec: server error %d: %s", resp.StatusCode, string(data))
-	}
-	return data, nil
+	return data, resp.StatusCode, nil
 }

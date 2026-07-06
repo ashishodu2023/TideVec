@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tidevec.fullname" . }}-config
+  labels:
+    {{- include "tidevec.labels" . | nindent 4 }}
+data:
+  TIDEVEC_THREADS: "{{ .Values.config.threads }}"
+  TIDEVEC_DEVICE: "{{ .Values.config.device }}"
+  TIDEVEC_REQUIRE_AUTH: "{{ ternary "1" "0" .Values.config.requireAuth }}"
+  TIDEVEC_ULTRA_DURABLE: "{{ ternary "1" "0" .Values.config.ultraDurable }}"
+  TIDEVEC_SEGMENT_STORE: "{{ ternary "1" "0" .Values.config.segmentStore }}"
+  TIDEVEC_BACKUP: "{{ ternary "1" "0" .Values.config.backup }}"
+  TIDEVEC_DATA_DIR: "/data"
+  TIDEVEC_BACKUP_DIR: "/data/backups"
+  {{- if .Values.config.otelEndpoint }}
+  TIDEVEC_OTEL_ENDPOINT: "{{ .Values.config.otelEndpoint }}"
+  {{- end }}
+  {{- if .Values.backup.s3Uri }}
+  TIDEVEC_BACKUP_S3: "{{ .Values.backup.s3Uri }}"
+  {{- end }}
+  {{- if .Values.backup.gcsUri }}
+  TIDEVEC_BACKUP_GCS: "{{ .Values.backup.gcsUri }}"
+  {{- end }}

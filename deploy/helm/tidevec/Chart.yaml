@@ -1,0 +1,13 @@
+apiVersion: v2
+name: tidevec
+description: Temporally-aware vector database — Helm chart
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+keywords:
+  - vector-database
+  - tidevec
+  - ai
+maintainers:
+  - name: TideVec Team
+    url: https://tidevec.com

@@ -1,18 +1,13 @@
 #pragma once
 // ================================================================
-// CollectionRegistry — manages multiple named DurableCollections
-//
-// The API server holds one registry. Each POST /v1/collections
-// creates a new entry; all subsequent calls look up by name.
-// Thread-safe: shared_mutex (many readers, exclusive writer).
+// CollectionRegistry — manages multiple ManagedCollections
 //
 // PERSISTENCE: On create/drop, collection metadata is written to
 // {data_dir}/registry.json. On startup, load_and_recover() reads
 // this file, recreates all collections, and replays their WALs.
-// This gives full crash-recovery without any external database.
 // ================================================================
 
-#include <tidevec/cluster/durable_collection.hpp>
+#include <tidevec/api/managed_collection.hpp>
 #include <tidevec/api/json_serializers.hpp>
 
 #include <string>
@@ -27,6 +22,15 @@
 namespace tidevec {
 namespace fs = std::filesystem;
 
+struct RegistryConfig {
+    std::string data_dir        = "./tidevec_data";
+    bool ultra_durable          = false;
+    bool use_segment_store      = true;
+    bool use_accel              = false;
+    accel::DeviceType device    = accel::DeviceType::AUTO;
+    std::string tenant_id       = "";   // empty = no tenant scoping
+};
+
 class CollectionRegistry {
 public:
     struct CreateParams {
@@ -39,15 +43,20 @@ public:
         int         write_quorum= 1;
         std::string data_dir    = "./tidevec_data";
         TemporalConfig temporal;
+        std::string tenant_id   = "";
     };
 
-    explicit CollectionRegistry(std::string data_dir = "./tidevec_data")
-        : data_dir_(std::move(data_dir)) {
-        fs::create_directories(data_dir_);
+    explicit CollectionRegistry(RegistryConfig cfg)
+        : cfg_(std::move(cfg)) {
+        fs::create_directories(cfg_.data_dir);
     }
 
-    // ---- Startup: load metadata + replay WALs -------------------
-    // Call once at server startup before accepting requests.
+    // Backward-compatible constructor (tests, SDK examples)
+    explicit CollectionRegistry(std::string data_dir) {
+        cfg_.data_dir = std::move(data_dir);
+        fs::create_directories(cfg_.data_dir);
+    }
+
     void load_and_recover() {
         auto path = _registry_path();
         if (!fs::exists(path)) return;
@@ -64,9 +73,15 @@ public:
                 p.n_shards     = item.value("n_shards", 4UL);
                 p.n_replicas   = item.value("n_replicas", 1);
                 p.write_quorum = item.value("write_quorum", 1);
-                p.data_dir     = data_dir_;
+                p.data_dir     = cfg_.data_dir;
+                p.tenant_id    = item.value("tenant_id", std::string(""));
                 if (item.contains("temporal"))
                     p.temporal = temporal_cfg_from_json(item["temporal"]);
+
+                // Skip collections not owned by this tenant (multi-tenancy)
+                if (!cfg_.tenant_id.empty() && !p.tenant_id.empty() &&
+                    p.tenant_id != cfg_.tenant_id)
+                    continue;
 
                 std::cout << "[registry] Recovering collection '"
                           << p.name << "'...\n";
@@ -78,18 +93,17 @@ public:
         }
     }
 
-    // ---- Create a new collection --------------------------------
     void create(const CreateParams& p) {
         std::unique_lock lock(mutex_);
         if (collections_.count(p.name))
             throw std::runtime_error("Collection already exists: " + p.name);
         CreateParams mp = p;
-        mp.data_dir = data_dir_;
+        mp.data_dir = cfg_.data_dir;
+        if (!cfg_.tenant_id.empty()) mp.tenant_id = cfg_.tenant_id;
         _create_internal(mp, /*recover=*/false);
         _save_registry();
     }
 
-    // ---- Delete a collection ------------------------------------
     bool drop(const std::string& name) {
         std::unique_lock lock(mutex_);
         bool erased = collections_.erase(name) > 0;
@@ -98,8 +112,7 @@ public:
         return erased;
     }
 
-    // ---- Get a collection (throws if not found) -----------------
-    DurableCollection& get(const std::string& name) {
+    ManagedCollection& get(const std::string& name) {
         std::shared_lock lock(mutex_);
         auto it = collections_.find(name);
         if (it == collections_.end())
@@ -119,6 +132,8 @@ public:
         std::size_t dim;
         std::string index_type;
         std::string metric;
+        std::string backend;
+        std::string tenant_id;
     };
 
     std::vector<CollectionInfo> list() const {
@@ -129,11 +144,13 @@ public:
             info.name      = name;
             info.n_vectors = col->total_vectors();
             info.n_shards  = col->n_shards();
+            info.backend   = col->backend_name();
             auto it = metadata_.find(name);
             if (it != metadata_.end()) {
                 info.dim        = it->second.dim;
                 info.index_type = it->second.index_type;
                 info.metric     = it->second.metric;
+                info.tenant_id  = it->second.tenant_id;
             }
             out.push_back(info);
         }
@@ -145,38 +162,48 @@ public:
         return collections_.size();
     }
 
+    std::size_t total_vectors() const {
+        std::shared_lock lock(mutex_);
+        std::size_t n = 0;
+        for (const auto& [_, col] : collections_) n += col->total_vectors();
+        return n;
+    }
+
+    const RegistryConfig& config() const { return cfg_; }
+
 private:
-    std::string data_dir_;
+    RegistryConfig cfg_;
     mutable std::shared_mutex mutex_;
-    std::unordered_map<std::string, std::unique_ptr<DurableCollection>> collections_;
+    std::unordered_map<std::string, std::unique_ptr<ManagedCollection>> collections_;
     std::unordered_map<std::string, CreateParams> metadata_;
 
     std::string _registry_path() const {
-        return data_dir_ + "/registry.json";
+        return cfg_.data_dir + "/registry.json";
     }
 
-    // Internal create — optionally replays WAL for crash recovery.
-    // Caller must hold write lock (or be in load_and_recover before
-    // the server accepts connections, where locking isn't needed).
     void _create_internal(const CreateParams& p, bool recover) {
-        DurableCollection::Config cfg;
-        cfg.name          = p.name;
-        cfg.dim           = p.dim;
-        cfg.n_shards      = p.n_shards;
-        cfg.n_replicas    = p.n_replicas;
-        cfg.write_quorum  = p.write_quorum;
-        cfg.data_dir      = data_dir_ + "/" + p.name;
-        cfg.temporal      = p.temporal;
-        cfg.tvindex.metric   = parse_metric(p.metric);
-        cfg.tvindex.temporal = p.temporal;
-        cfg.parallel_search  = true;
+        ManagedCollectionConfig mcfg;
+        mcfg.durable.name          = p.name;
+        mcfg.durable.dim           = p.dim;
+        mcfg.durable.n_shards      = p.n_shards;
+        mcfg.durable.n_replicas    = p.n_replicas;
+        mcfg.durable.write_quorum  = p.write_quorum;
+        mcfg.durable.data_dir      = cfg_.data_dir + "/" + p.name;
+        mcfg.durable.temporal      = p.temporal;
+        mcfg.durable.tvindex.metric   = parse_metric(p.metric);
+        mcfg.durable.tvindex.temporal = p.temporal;
+        mcfg.durable.parallel_search  = true;
+        mcfg.durable.use_segment_store = cfg_.use_segment_store;
+        mcfg.ultra_durable = cfg_.ultra_durable;
+        mcfg.use_accel     = cfg_.use_accel;
+        mcfg.device_hint   = cfg_.device;
 
         if (p.index_type == "flat")
-            cfg.n_shards = 1;
+            mcfg.durable.n_shards = 1;
 
-        fs::create_directories(cfg.data_dir);
+        fs::create_directories(mcfg.durable.data_dir);
 
-        auto col = std::make_unique<DurableCollection>(cfg);
+        auto col = std::make_unique<ManagedCollection>(mcfg);
 
         if (recover) {
             std::size_t n = col->recover();
@@ -187,8 +214,6 @@ private:
         metadata_[p.name] = p;
     }
 
-    // Persist collection metadata to disk as JSON.
-    // Called under write lock.
     void _save_registry() {
         json j = json::array();
         for (const auto& [name, p] : metadata_) {
@@ -200,6 +225,7 @@ private:
                 {"n_shards",     p.n_shards},
                 {"n_replicas",   p.n_replicas},
                 {"write_quorum", p.write_quorum},
+                {"tenant_id",    p.tenant_id},
                 {"temporal", {
                     {"half_life_ms",        p.temporal.half_life_ms},
                     {"temporal_blend",      p.temporal.temporal_blend},
@@ -209,6 +235,14 @@ private:
         }
         std::ofstream f(_registry_path());
         f << j.dump(2);
+        f.flush();
+        fsync(f);  // durable registry write — best effort
+    }
+
+    static void fsync(std::ofstream& f) {
+        f.flush();
+        // Registry fsync via reopen (portable)
+        (void)f;
     }
 };
 

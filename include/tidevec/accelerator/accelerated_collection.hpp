@@ -276,6 +276,23 @@ public:
         durable_.set_temporal_config(cfg);
     }
 
+    std::vector<CortexVector> snapshot_vectors() const {
+        return durable_.snapshot_vectors();
+    }
+
+    void swap_index(std::unique_ptr<TVIndex> idx) {
+        durable_.swap_index(std::move(idx));
+    }
+
+    TemporalConfig temporal_config() const {
+        return durable_.temporal_config();
+    }
+
+    std::size_t recover() { return durable_.recover(); }
+    std::size_t n_shards() const { return durable_.n_shards(); }
+    uint64_t total_writes()  const { return durable_.total_writes(); }
+    uint64_t total_queries() const { return durable_.total_queries(); }
+
 private:
     struct VecMeta {
         Timestamp created_at;

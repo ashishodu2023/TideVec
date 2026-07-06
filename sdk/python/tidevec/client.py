@@ -26,6 +26,8 @@ Quick start:
 from __future__ import annotations
 
 import json as _json
+import os as _os
+import time as _time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -53,6 +55,18 @@ class APIError(TideVecError):
     def __init__(self, message: str, status: int):
         super().__init__(f"[{status}] {message}")
         self.status = status
+
+
+class UnauthorizedError(APIError):
+    """Raised when X-Api-Key is missing or invalid (HTTP 401)."""
+
+
+class ForbiddenError(APIError):
+    """Raised when tenant lacks access (HTTP 403)."""
+
+
+class RateLimitError(APIError):
+    """Raised when rate limit is exceeded (HTTP 429)."""
 
 
 # ------------------------------------------------------------------
@@ -116,6 +130,21 @@ class CollectionInfo:
     n_shards:      int = 0
     total_writes:  int = 0
     total_queries: int = 0
+    dim:           int = 0
+    index_type:    str = "tvindex"
+    metric:        str = "cosine"
+    backend:       str = "durable"
+
+
+@dataclass
+class DriftStatus:
+    collection:    str
+    phase:         str
+    total_vectors: int = 0
+    migrated:      int = 0
+    skipped:       int = 0
+    pct_complete:  float = 0.0
+    error:         str = ""
 
 
 class HalfLife:
@@ -137,8 +166,11 @@ class TideVec:
 
     Args:
         host: "host:port", default port is 6399 if omitted.
-        api_key: optional API key, sent as the X-Api-Key header.
+        api_key: API key sent as X-Api-Key header. Falls back to
+                 TIDEVEC_API_KEY env var if not provided.
         timeout: request timeout in seconds (default 30).
+        tls: use HTTPS instead of HTTP.
+        max_retries: retry count for 429 rate-limit responses.
     """
 
     def __init__(
@@ -147,13 +179,15 @@ class TideVec:
         api_key: str = "",
         timeout: float = 30.0,
         tls: bool = False,
+        max_retries: int = 3,
     ):
         if ":" not in host:
             host = f"{host}:6399"
         scheme = "https" if tls else "http"
         self._base_url = f"{scheme}://{host}"
-        self._api_key = api_key
+        self._api_key = api_key or _os.environ.get("TIDEVEC_API_KEY", "")
         self._timeout = timeout
+        self._max_retries = max_retries
 
     def __enter__(self) -> "TideVec":
         return self
@@ -167,6 +201,18 @@ class TideVec:
     # ---- internal HTTP helpers -----------------------------------
 
     def _request(self, method: str, path: str, body: Optional[dict] = None) -> dict:
+        last_err: Optional[Exception] = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                return self._request_once(method, path, body)
+            except RateLimitError as e:
+                last_err = e
+                if attempt >= self._max_retries:
+                    raise
+                _time.sleep(min(2 ** attempt, 8))
+        raise last_err  # type: ignore[misc]
+
+    def _request_once(self, method: str, path: str, body: Optional[dict] = None) -> dict:
         url = self._base_url + path
         data = _json.dumps(body).encode("utf-8") if body is not None else None
         req = urllib.request.Request(url, data=data, method=method)
@@ -187,6 +233,12 @@ class TideVec:
                 msg = raw.decode("utf-8", errors="replace") or str(e)
             if e.code == 404:
                 raise CollectionNotFoundError(msg) from e
+            if e.code == 401:
+                raise UnauthorizedError(msg, e.code) from e
+            if e.code == 403:
+                raise ForbiddenError(msg, e.code) from e
+            if e.code == 429:
+                raise RateLimitError(msg, e.code) from e
             raise APIError(msg, e.code) from e
         except urllib.error.URLError as e:
             raise ConnectionError_(
@@ -221,7 +273,15 @@ class TideVec:
 
     def info(self) -> dict:
         """Return server info: name, version, description, features."""
-        return self._get("/v1/info")["data"]
+        resp = self._get("/v1/info")
+        return resp.get("data", resp)
+
+    def metrics(self) -> str:
+        """Return Prometheus metrics text from GET /metrics."""
+        url = self._base_url + "/metrics"
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+            return resp.read().decode("utf-8")
 
     # ---- collections -------------------------------------------
 
@@ -273,6 +333,10 @@ class TideVec:
             n_shards=d.get("n_shards", 0),
             total_writes=d.get("total_writes", 0),
             total_queries=d.get("total_queries", 0),
+            dim=d.get("dim", 0),
+            index_type=d.get("index_type", "tvindex"),
+            metric=d.get("metric", "cosine"),
+            backend=d.get("backend", "durable"),
         )
 
     def list_collections(self) -> List[CollectionInfo]:
@@ -282,8 +346,10 @@ class TideVec:
             CollectionInfo(
                 name=c["name"], n_vectors=c.get("n_vectors", 0),
                 n_shards=c.get("n_shards", 0),
-                total_writes=c.get("total_writes", 0),
-                total_queries=c.get("total_queries", 0),
+                dim=c.get("dim", 0),
+                index_type=c.get("index_type", "tvindex"),
+                metric=c.get("metric", "cosine"),
+                backend=c.get("backend", "durable"),
             ) for c in resp.get("data", [])
         ]
 
@@ -400,6 +466,84 @@ class TideVec:
         resp = self._post(f"/v1/collections/{collection}/edges", {"edges": edges})
         return resp["data"]["added"]
 
+    # ---- DriftBridge (zero-downtime model migration) ------------
+
+    def start_drift(
+        self,
+        collection: str,
+        reembed_url: str,
+        *,
+        M: int = 16,
+        ef_construction: int = 200,
+        half_life_ms: Optional[int] = None,
+        temporal_blend: Optional[float] = None,
+    ) -> dict:
+        """
+        Start a zero-downtime embedding model migration.
+
+        reembed_url must be a public http(s) endpoint on the server allowlist
+        that accepts POST {"id":..., "payload":...} and returns {"embedding":[...]}.
+        """
+        body: Dict[str, Any] = {
+            "reembed_url": reembed_url,
+            "M": M,
+            "ef_construction": ef_construction,
+        }
+        if half_life_ms is not None or temporal_blend is not None:
+            body["temporal"] = {}
+            if half_life_ms is not None:
+                body["temporal"]["half_life_ms"] = half_life_ms
+            if temporal_blend is not None:
+                body["temporal"]["temporal_blend"] = temporal_blend
+        resp = self._post(f"/v1/collections/{collection}/drift/start", body)
+        return resp["data"]
+
+    def drift_status(self, collection: str) -> DriftStatus:
+        """Poll migration progress for a collection."""
+        resp = self._get(f"/v1/collections/{collection}/drift/status")
+        d = resp["data"]
+        return DriftStatus(
+            collection=d.get("collection", collection),
+            phase=d.get("phase", "IDLE"),
+            total_vectors=d.get("total_vectors", 0),
+            migrated=d.get("migrated", 0),
+            skipped=d.get("skipped", 0),
+            pct_complete=float(d.get("pct_complete", 0)),
+            error=d.get("error", ""),
+        )
+
+    def abort_drift(self, collection: str) -> None:
+        """Abort an in-progress migration; live index is kept."""
+        self._post(f"/v1/collections/{collection}/drift/abort", {})
+
+    # ---- Admin (backups, requires auth) --------------------------
+
+    def trigger_backup(self) -> str:
+        """Trigger a manual snapshot. Returns the snapshot filename."""
+        resp = self._post("/v1/admin/backup", {})
+        return resp["data"]["snapshot"]
+
+    def list_backups(self) -> List[str]:
+        """List available backup snapshot filenames."""
+        resp = self._get("/v1/admin/backups")
+        return resp["data"].get("snapshots", [])
+
+    def list_backup_manifests(self) -> List[dict]:
+        """Return PITR manifest history with timestamps and cloud URIs."""
+        resp = self._get("/v1/admin/backups/manifests")
+        return resp["data"].get("manifests", [])
+
+    def restore_backup(self, snapshot: str) -> dict:
+        """
+        Restore data from a snapshot (point-in-time recovery).
+        Creates a safety snapshot first. Server restart required after restore.
+        """
+        resp = self._post("/v1/admin/restore", {
+            "snapshot": snapshot,
+            "confirm": True,
+        })
+        return resp["data"]
+
 
 # ------------------------------------------------------------------
 # Async client — thin wrapper using a thread pool, since the server
@@ -417,8 +561,9 @@ class AsyncTideVec:
             results = await db.search("docs", query)
     """
 
-    def __init__(self, host: str = "localhost:6399", api_key: str = "", timeout: float = 30.0):
-        self._sync = TideVec(host, api_key=api_key, timeout=timeout)
+    def __init__(self, host: str = "localhost:6399", api_key: str = "",
+                 timeout: float = 30.0, tls: bool = False):
+        self._sync = TideVec(host, api_key=api_key, timeout=timeout, tls=tls)
 
     async def __aenter__(self) -> "AsyncTideVec":
         return self

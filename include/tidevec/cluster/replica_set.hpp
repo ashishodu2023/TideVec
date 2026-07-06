@@ -89,6 +89,9 @@ public:
             throw std::runtime_error(
                 "Write quorum not met: only " + std::to_string(acked) +
                 " of " + std::to_string(cfg_.write_quorum) + " acked");
+
+        // fsync primary WAL after quorum commit
+        primary_wal_->fsync_to_disk();
     }
 
     bool remove(const std::string& id) {

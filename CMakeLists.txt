@@ -11,6 +11,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(TIDEVEC_BUILD_TESTS "Build test binaries (set OFF for Docker builds)" ON)
 option(TIDEVEC_CUDA        "Build with CUDA GPU support" OFF)
 option(TIDEVEC_XLA         "Build with XLA/TPU support" OFF)
+option(TIDEVEC_TLS         "Enable TLS support via OpenSSL" OFF)
 
 # ---- Compiler flags ----------------------------------------------
 set(TIDEVEC_WARN_FLAGS
@@ -52,6 +53,13 @@ add_executable(tidevec-server
 )
 target_link_libraries(tidevec-server PRIVATE tidevec_headers Threads::Threads)
 target_compile_options(tidevec-server PRIVATE ${TIDEVEC_WARN_FLAGS} -O2)
+
+if(TIDEVEC_TLS)
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(tidevec-server PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(tidevec-server PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT TIDEVEC_TLS)
+    message(STATUS "TLS support ENABLED (OpenSSL)")
+endif()
 
 # ---- CUDA (optional) --------------------------------------------
 if(TIDEVEC_CUDA)

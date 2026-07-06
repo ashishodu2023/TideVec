@@ -1,22 +1,5 @@
 # ================================================================
 # TideVec — Full stack docker-compose
-#
-# Services:
-#   tidevec      — TideVec server (CPU, default)
-#   tidevec-gpu  — TideVec server (GPU, --profile gpu)
-#   prometheus    — Metrics scraping
-#   grafana       — Dashboards (port 3000, admin/tidevec)
-#   jaeger        — Distributed tracing (port 16686)
-#
-# Usage:
-#   # CPU (default)
-#   docker compose up -d
-#
-#   # With GPU
-#   docker compose --profile gpu up -d
-#
-#   # Full observability stack
-#   docker compose --profile monitoring up -d
 # ================================================================
 
 services:
@@ -27,29 +10,43 @@ services:
     container_name: tidevec
     restart: unless-stopped
     ports:
-      - "6399:6399"   # REST API
-      - "6400:6400"   # gRPC
+      - "6399:6399"
     volumes:
       - tidevec_data:/data
     environment:
       - TIDEVEC_THREADS=8
-      - TIDEVEC_LOG_LEVEL=info
+      - TIDEVEC_DEVICE=auto
+      - TIDEVEC_REQUIRE_AUTH=1
+      - TIDEVEC_ULTRA_DURABLE=1
+      - TIDEVEC_SEGMENT_STORE=1
       - TIDEVEC_API_KEY=${TIDEVEC_API_KEY:-}
-    command:
-      - "--host=0.0.0.0"
-      - "--port=6399"
-      - "--data-dir=/data"
-      - "--threads=8"
+      - TIDEVEC_BACKUP=${TIDEVEC_BACKUP:-1}
+      - TIDEVEC_BACKUP_DIR=/data/backups
+      - TIDEVEC_OTEL_ENDPOINT=${TIDEVEC_OTEL_ENDPOINT:-http://jaeger:4318/v1/traces}
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:6399/health"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
     networks: [tidevec_net]
     logging:
       driver: json-file
       options: { max-size: "50m", max-file: "3" }
+
+  # ── TLS reverse proxy (optional) ───────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: tidevec-nginx
+    profiles: [tls]
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/tidevec.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on: [tidevec]
+    networks: [tidevec_net]
 
   # ── TideVec GPU (optional) ─────────────────────────────────────
   tidevec-gpu:
@@ -59,12 +56,14 @@ services:
     restart: unless-stopped
     ports:
       - "6401:6399"
-      - "6402:6400"
     volumes:
       - tidevec_gpu_data:/data
     environment:
       - TIDEVEC_THREADS=16
       - TIDEVEC_DEVICE=gpu
+      - TIDEVEC_REQUIRE_AUTH=1
+      - TIDEVEC_ULTRA_DURABLE=1
+      - TIDEVEC_API_KEY=${TIDEVEC_API_KEY:-}
     deploy:
       resources:
         reservations:
@@ -103,7 +102,7 @@ services:
       - grafana_data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=tidevec
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-changeme}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_AUTH_ANONYMOUS_ENABLED=false
     depends_on: [prometheus]
@@ -116,9 +115,9 @@ services:
     profiles: [monitoring]
     restart: unless-stopped
     ports:
-      - "16686:16686"   # Jaeger UI
-      - "4317:4317"     # OTLP gRPC
-      - "4318:4318"     # OTLP HTTP
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     networks: [tidevec_net]

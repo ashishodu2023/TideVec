@@ -21,6 +21,7 @@
 #include <tidevec/cluster/shard_router.hpp>
 #include <tidevec/cluster/replica_set.hpp>
 #include <tidevec/storage/wal.hpp>
+#include <tidevec/storage/segment_store.hpp>
 #include <tidevec/observability/retrieval_trace.hpp>
 #include <iostream>
 
@@ -47,9 +48,19 @@ public:
         TemporalConfig temporal;
         TVIndexConfig  tvindex;
         bool parallel_search         = true;
+        bool use_segment_store       = false;  // disk-backed vector storage
+        std::size_t segment_buf_size = 100'000;
     };
 
     explicit DurableCollection(Config cfg) : cfg_(std::move(cfg)) {
+        if (cfg_.use_segment_store) {
+            SegmentStore::Config scfg;
+            scfg.data_dir         = cfg_.data_dir + "/segments";
+            scfg.collection_name  = cfg_.name;
+            scfg.dim              = cfg_.dim;
+            scfg.write_buf_size   = cfg_.segment_buf_size;
+            segment_store_ = std::make_unique<SegmentStore>(scfg);
+        }
         _build_shards();
     }
 
@@ -100,10 +111,12 @@ public:
 
     void upsert(const CortexVector& vec) {
         _shard_for(vec.id).upsert(vec);
+        if (segment_store_) segment_store_->put(vec);
         ++total_writes_;
     }
 
     bool remove(const std::string& id) {
+        if (segment_store_) segment_store_->mark_deleted(id);
         return _shard_for(id).remove(id);
     }
 
@@ -232,6 +245,20 @@ private:
 
             shard_replicas_.push_back(std::make_unique<ReplicaSet>(rscfg));
         }
+
+        // Wire SegmentStore as disk-backed vector store for PQ rescoring
+        if (segment_store_) {
+            SegmentStore* store_ptr = segment_store_.get();
+            VectorStore fetch = [store_ptr](const std::string& id) {
+                auto v = store_ptr->get(id);
+                if (!v) return std::vector<float>{};
+                return v->embedding;
+            };
+            for (auto& rs : shard_replicas_) {
+                if (auto* col = rs->primary())
+                    col->set_vector_store(fetch);
+            }
+        }
     }
 
     ReplicaSet& _shard_for(const std::string& id) {
@@ -249,6 +276,7 @@ private:
 
     Config cfg_;
     std::vector<std::unique_ptr<ReplicaSet>> shard_replicas_;
+    std::unique_ptr<SegmentStore> segment_store_;
     std::atomic<uint64_t> total_writes_{0};
     std::atomic<uint64_t> total_queries_{0};
 };
