@@ -4,8 +4,8 @@
 # Publishes to:
 #   averm004/tidevec:latest      (CPU, multi-arch)
 #   averm004/tidevec:cpu         (CPU, multi-arch)
-#   averm004/tidevec:gpu         (GPU, amd64, tag-only)
-#   averm004/tidevec:tpu         (TPU, amd64, tag-only)
+#   averm004/tidevec:gpu         (GPU, amd64 — main + v* tags)
+#   averm004/tidevec:tpu         (TPU, amd64 — main + v* tags)
 #
 # Required GitHub Secrets:
 #   DOCKER_USERNAME = averm004
@@ -75,11 +75,11 @@ jobs:
           cache-from: type=gha,scope=cpu-${{ matrix.platform }}
           cache-to:   type=gha,scope=cpu-${{ matrix.platform }},mode=max
 
-  # ── GPU (tag-only, amd64) ──────────────────────────────────────
+  # ── GPU (amd64) — main + version tags ─────────────────────────
   build-gpu:
     name: Build GPU (amd64)
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -96,9 +96,10 @@ jobs:
         with:
           images: ${{ env.DOCKERHUB_REPO }}
           tags: |
-            type=raw,value=gpu
+            type=raw,value=gpu,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
             type=semver,pattern={{version}},suffix=-gpu
             type=semver,pattern={{major}}.{{minor}},suffix=-gpu
+            type=sha,prefix=sha-,suffix=-gpu
 
       - name: Build and push GPU image
         uses: docker/build-push-action@v6
@@ -117,11 +118,11 @@ jobs:
           cache-from: type=gha,scope=gpu
           cache-to:   type=gha,scope=gpu,mode=max
 
-  # ── TPU (tag-only, amd64) ──────────────────────────────────────
+  # ── TPU (amd64) — main + version tags ─────────────────────────
   build-tpu:
     name: Build TPU (amd64)
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -138,9 +139,10 @@ jobs:
         with:
           images: ${{ env.DOCKERHUB_REPO }}
           tags: |
-            type=raw,value=tpu
+            type=raw,value=tpu,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
             type=semver,pattern={{version}},suffix=-tpu
             type=semver,pattern={{major}}.{{minor}},suffix=-tpu
+            type=sha,prefix=sha-,suffix=-tpu
 
       - name: Build and push TPU image
         uses: docker/build-push-action@v6
@@ -174,7 +176,7 @@ jobs:
           password:         ${{ secrets.DOCKER_PASSWORD }}
           repository:       ${{ env.DOCKERHUB_REPO }}
           readme-filepath:  ./docker/DOCKERHUB_README.md
-          short-description: "Temporally-aware causal vector database — C++20, GPU CAGRA, 11-nines durability"
+          short-description: "CortexDB / TideVec — temporally-aware causal vector DB (CPU, GPU, TPU)"
 
   # ── Security scan ───────────────────────────────────────────────
   scan:
