@@ -82,6 +82,7 @@ if(TIDEVEC_CUDA)
     target_compile_definitions(tidevec_cuda PUBLIC TIDEVEC_CUDA_ENABLED)
     target_compile_options(tidevec_cuda PRIVATE
             -arch=sm_80
+            --extended-lambda
             --use_fast_math
             -O3
     )
