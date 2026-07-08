@@ -176,7 +176,7 @@ jobs:
           password:         ${{ secrets.DOCKER_PASSWORD }}
           repository:       ${{ env.DOCKERHUB_REPO }}
           readme-filepath:  ./docker/DOCKERHUB_README.md
-          short-description: "CortexDB / TideVec — temporally-aware causal vector DB (CPU, GPU, TPU)"
+          short-description: "TideVec — temporally-aware causal vector DB (CPU, GPU, TPU)"
 
   # ── Security scan ───────────────────────────────────────────────
   scan:

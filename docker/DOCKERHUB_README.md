@@ -1,12 +1,11 @@
-# TideVec · CortexDB
+# TideVec
 
-**CortexDB** is the project codename for **TideVec** — the world's first temporally-aware causal vector database.
+**The world's first temporally-aware causal vector database.**
 
 Published on Docker Hub as [`averm004/tidevec`](https://hub.docker.com/r/averm004/tidevec).
 
 [![Docker](https://img.shields.io/badge/Docker-averm004%2Ftidevec-blue?logo=docker)](https://hub.docker.com/r/averm004/tidevec)
 [![GitHub](https://img.shields.io/badge/GitHub-ashishodu2023%2FTideVec-blue?logo=github)](https://github.com/ashishodu2023/TideVec)
-[![GitHub CortexDB](https://img.shields.io/badge/CortexDB-ashishodu2023%2FCortexdb-6b7280?logo=github)](https://github.com/ashishodu2023/TideVec)
 [![Website](https://img.shields.io/badge/Website-gettidevec.com-indigo)](https://gettidevec.com)
 [![License](https://img.shields.io/badge/License-Apache_2.0-green)](https://github.com/ashishodu2023/TideVec/blob/main/LICENSE)
 
@@ -156,7 +155,7 @@ Production flags (also via CLI): `--ultra-durable`, `--segment-store`, `--backup
 
 ---
 
-## What Makes CortexDB / TideVec Different
+## What Makes TideVec Different
 
 - **TVIndex** — HNSW with Ebbinghaus temporal decay. Fresh vectors rank higher automatically.
 - **CausalEdge** — Native typed-edge graph (CAUSES, CONTRADICTS, UPDATES). No separate Neo4j.
@@ -173,5 +172,5 @@ Production flags (also via CLI): `--ultra-durable`, `--segment-store`, `--backup
 - 🐳 [Docker Hub — averm004/tidevec](https://hub.docker.com/r/averm004/tidevec)
 - 🌐 [gettidevec.com](https://gettidevec.com)
 - 📚 [Documentation](https://gettidevec.com/docs)
-- ⭐ [GitHub — TideVec / CortexDB](https://github.com/ashishodu2023/TideVec)
+- ⭐ [GitHub — TideVec](https://github.com/ashishodu2023/TideVec)
 - 💬 [contact@tidevec.com](mailto:contact@tidevec.com)
