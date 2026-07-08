@@ -280,7 +280,7 @@ public:
         bool use_cosine = true;
     };
 
-    explicit CagraStyleEngine(Config cfg = {}, int device_id = 0)
+    explicit CagraStyleEngine(Config cfg = Config{}, int device_id = 0)
         : cfg_(cfg), device_id_(device_id) {}
 
     ~CagraStyleEngine() {
