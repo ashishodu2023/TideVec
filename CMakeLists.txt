@@ -64,9 +64,17 @@ endif()
 # ---- CUDA (optional) --------------------------------------------
 if(TIDEVEC_CUDA)
     enable_language(CUDA)
+    # Keep CUDA at a broadly-supported dialect for nvcc toolchains
+    # used by GitHub-hosted Docker builders.
+    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     find_package(CUDAToolkit REQUIRED)
     add_library(tidevec_cuda STATIC
             src/accelerator/gpu_kernels.cu
+    )
+    set_target_properties(tidevec_cuda PROPERTIES
+            CUDA_STANDARD 17
+            CUDA_STANDARD_REQUIRED ON
     )
     target_link_libraries(tidevec_cuda
             PRIVATE CUDA::cudart CUDA::cublas

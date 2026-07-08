@@ -15,7 +15,7 @@
 #     averm004/tidevec:tpu
 # ================================================================
 
-FROM tensorflow/tensorflow:2.15.0-devel AS builder
+FROM tensorflow/tensorflow:latest AS builder
 
 ARG VERSION=0.2.0
 
