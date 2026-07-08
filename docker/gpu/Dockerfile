@@ -52,7 +52,7 @@ LABEL org.opencontainers.image.title="TideVec GPU"
 LABEL org.opencontainers.image.description="TideVec with CUDA CAGRA kernels — GPU-accelerated search"
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/ashishodu2023/TideVec"
-LABEL org.opencontainers.image.url="https://gettidevec.com"
+LABEL org.opencontainers.image.url="https://tidevec.com"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL maintainer="contact@tidevec.com"
 

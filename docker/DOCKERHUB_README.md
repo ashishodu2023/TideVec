@@ -6,7 +6,7 @@
 |---|---|
 | **Docker** | [hub.docker.com/r/averm004/tidevec](https://hub.docker.com/r/averm004/tidevec) |
 | **GitHub** | [github.com/ashishodu2023/TideVec](https://github.com/ashishodu2023/TideVec) |
-| **Website** | [gettidevec.com](https://gettidevec.com) |
+| **Website** | [tidevec.com](https://tidevec.com) |
 | **License** | [Apache 2.0](https://github.com/ashishodu2023/TideVec/blob/main/LICENSE) |
 
 ---
@@ -170,7 +170,7 @@ Production flags (also via CLI): `--ultra-durable`, `--segment-store`, `--backup
 ## Links
 
 - 🐳 [Docker Hub — averm004/tidevec](https://hub.docker.com/r/averm004/tidevec)
-- 🌐 [gettidevec.com](https://gettidevec.com)
-- 📚 [Documentation](https://gettidevec.com/docs)
+- 🌐 [tidevec.com](https://tidevec.com)
+- 📚 [Documentation](https://docs.tidevec.com)
 - ⭐ [GitHub — TideVec](https://github.com/ashishodu2023/TideVec)
 - 💬 [contact@tidevec.com](mailto:contact@tidevec.com)

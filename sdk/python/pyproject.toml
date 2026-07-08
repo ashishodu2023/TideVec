@@ -31,9 +31,9 @@ pandas = ["pandas>=2.0"]
 dev    = ["pytest>=7", "pytest-asyncio", "black", "mypy"]
 
 [project.urls]
-Homepage      = "https://gettidevec.com"
+Homepage      = "https://tidevec.com"
 Repository    = "https://github.com/ashishodu2023/TideVec"
-Documentation = "https://gettidevec.com/docs"
+Documentation = "https://docs.tidevec.com"
 "Bug Tracker" = "https://github.com/ashishodu2023/TideVec/issues"
 PyPI          = "https://pypi.org/project/tidevec/"
 

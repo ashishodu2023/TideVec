@@ -70,7 +70,7 @@ LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_SHA}"
 LABEL org.opencontainers.image.source="https://github.com/ashishodu2023/TideVec"
-LABEL org.opencontainers.image.url="https://gettidevec.com"
+LABEL org.opencontainers.image.url="https://tidevec.com"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL maintainer="contact@tidevec.com"
 

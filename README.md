@@ -11,7 +11,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-orange)](https://en.cppreference.com/w/cpp/20)
 [![Docker](https://img.shields.io/badge/Docker-CPU%20%7C%20GPU%20%7C%20TPU-blue)](docker/)
 
-[**Docs**](https://gettidevec.com/docs) · [**gettidevec.com**](https://gettidevec.com) · [**CortexOps**](https://getcortexops.com)
+[**Docs**](https://docs.tidevec.com) · [**tidevec.com**](https://tidevec.com) · [**CortexOps**](https://getcortexops.com)
 
 </div>
 
@@ -941,7 +941,7 @@ tidevec/
 - [x] AgentContext TTL lifecycle policies
 - [x] Helm chart for Kubernetes (`deploy/helm/tidevec`)
 - [x] `tidevec` PyPI package (auto-publish on `v*` tags)
-- [x] gettidevec.com website (Vercel)
+- [x] tidevec.com website (Vercel)
 - [ ] Distributed Raft over gRPC (v0.3)
 - [ ] VLDB 2027 paper submission (v0.3)
 
@@ -959,6 +959,6 @@ Built by [Ashish Verma](https://github.com/ashishodu2023) — Senior Data Engine
 
 *Part of the [Cortex Platform](https://getcortexops.com): CortexOps (observability) + TideVec (vector storage)*
 
-**[gettidevec.com](https://gettidevec.com) · [GitHub](https://github.com/ashishodu2023/TideVec) · [PyPI](https://pypi.org/project/tidevec/)**
+**[tidevec.com](https://tidevec.com) · [GitHub](https://github.com/ashishodu2023/TideVec) · [PyPI](https://pypi.org/project/tidevec/)**
 
 </div>
