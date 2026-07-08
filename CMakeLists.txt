@@ -86,7 +86,8 @@ if(TIDEVEC_CUDA)
             --use_fast_math
             -O3
     )
-    target_link_libraries(tidevec-server PRIVATE tidevec_cuda)
+    target_link_libraries(tidevec-server PRIVATE tidevec_cuda CUDA::cudart CUDA::cublas)
+    target_include_directories(tidevec-server PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     target_compile_definitions(tidevec-server PRIVATE TIDEVEC_CUDA_ENABLED)
     message(STATUS "CUDA support ENABLED (sm_80)")
 endif()
