@@ -297,6 +297,10 @@ class TideVec:
         half_life_ms: int = HalfLife.ONE_MONTH,
         temporal_blend: float = 0.3,
         staleness_threshold: float = 0.2,
+        agent_id: str = "",
+        memory_ttl_seconds: int = 0,
+        dedup_threshold: float = 0.0,
+        agent_enabled: bool = False,
     ) -> str:
         """Create a new collection. Returns the collection name."""
         body = {
@@ -313,6 +317,13 @@ class TideVec:
                 "staleness_threshold": staleness_threshold,
             },
         }
+        if agent_enabled or memory_ttl_seconds > 0 or dedup_threshold > 0:
+            body["agent"] = {
+                "enabled": agent_enabled or memory_ttl_seconds > 0,
+                "agent_id": agent_id,
+                "memory_ttl_seconds": memory_ttl_seconds,
+                "dedup_threshold": dedup_threshold,
+            }
         resp = self._post("/v1/collections", body)
         return resp["data"]["name"]
 

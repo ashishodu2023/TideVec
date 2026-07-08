@@ -43,6 +43,7 @@ public:
         int         write_quorum= 1;
         std::string data_dir    = "./tidevec_data";
         TemporalConfig temporal;
+        AgentContext   agent;
         std::string tenant_id   = "";
     };
 
@@ -77,6 +78,8 @@ public:
                 p.tenant_id    = item.value("tenant_id", std::string(""));
                 if (item.contains("temporal"))
                     p.temporal = temporal_cfg_from_json(item["temporal"]);
+                if (item.contains("agent"))
+                    p.agent = agent_cfg_from_json(item["agent"]);
 
                 // Skip collections not owned by this tenant (multi-tenancy)
                 if (!cfg_.tenant_id.empty() && !p.tenant_id.empty() &&
@@ -190,6 +193,7 @@ private:
         mcfg.durable.write_quorum  = p.write_quorum;
         mcfg.durable.data_dir      = cfg_.data_dir + "/" + p.name;
         mcfg.durable.temporal      = p.temporal;
+        mcfg.durable.agent         = p.agent;
         mcfg.durable.tvindex.metric   = parse_metric(p.metric);
         mcfg.durable.tvindex.temporal = p.temporal;
         mcfg.durable.parallel_search  = true;
@@ -232,6 +236,8 @@ private:
                     {"staleness_threshold", p.temporal.staleness_threshold},
                 }},
             });
+            if (p.agent.enabled)
+                j.back()["agent"] = agent_cfg_to_json(p.agent);
         }
         std::ofstream f(_registry_path());
         f << j.dump(2);

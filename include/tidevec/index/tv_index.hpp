@@ -280,6 +280,20 @@ public:
 
     // ------ search ------------------------------------------------
 
+    // Remove vectors whose validity window has passed.
+    std::size_t purge_expired(Timestamp qt = now_ms()) {
+        std::unique_lock lock(mutex_);
+        std::size_t n = 0;
+        for (const auto& node : nodes_) {
+            if (deleted_.count(node.internal_id)) continue;
+            if (node.valid_until.has_value() && qt > node.valid_until.value()) {
+                deleted_.insert(node.internal_id);
+                ++n;
+            }
+        }
+        return n;
+    }
+
     std::vector<SearchResult> search(const std::vector<float>& query,
                                      const QueryOptions& opts) const {
         std::shared_lock lock(mutex_);
@@ -317,6 +331,8 @@ public:
         for (int i = 0; i < k; ++i) {
             auto [score, iid] = candidates[i];
             const auto& node = nodes_[iid];
+            if (node.valid_until.has_value() && qt > node.valid_until.value())
+                continue;
 
             float raw_sim;
             bool  approximate = false;
@@ -539,7 +555,7 @@ private:
                 visited.insert(nb);
 
                 const auto& nnode = nodes_[nb];
-                if (!nnode.valid_until.has_value() == false &&
+                if (nnode.valid_until.has_value() &&
                     qt > nnode.valid_until.value()) continue;
                 if (!filter.empty() && !_filter_match(nnode, filter)) continue;
                 if (scorer_.is_hard_excluded_raw(nnode.created_at, qt)) continue;

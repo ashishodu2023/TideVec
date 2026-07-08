@@ -167,6 +167,29 @@ inline TemporalConfig temporal_cfg_from_json(const json& j) {
     return cfg;
 }
 
+// ------ AgentContext from JSON -----------------------------------
+inline AgentContext agent_cfg_from_json(const json& j) {
+    AgentContext cfg;
+    cfg.agent_id    = j.value("agent_id", std::string(""));
+    cfg.memory_ttl_seconds = j.value("memory_ttl_seconds", int64_t{0});
+    cfg.dedup_threshold    = j.value("dedup_threshold", 0.0f);
+    cfg.enabled            = j.value("enabled", false);
+    if (j.contains("cross_agent_readable"))
+        cfg.cross_agent_readable =
+            j["cross_agent_readable"].get<std::vector<std::string>>();
+    return cfg;
+}
+
+inline json agent_cfg_to_json(const AgentContext& cfg) {
+    return {
+        {"agent_id",             cfg.agent_id},
+        {"memory_ttl_seconds",   cfg.memory_ttl_seconds},
+        {"dedup_threshold",      cfg.dedup_threshold},
+        {"cross_agent_readable", cfg.cross_agent_readable},
+        {"enabled",              cfg.enabled},
+    };
+}
+
 // ------ Standard API responses -----------------------------------
 inline json ok(json data = nullptr) {
     json r; r["status"] = "ok";

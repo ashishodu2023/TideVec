@@ -102,6 +102,12 @@ public:
 
     // ------ search ------------------------------------------------
 
+    void purge_expired() {
+        if (tv_) tv_->purge_expired();
+    }
+
+    const AgentContext& agent_config() const { return cfg_.agent; }
+
     std::vector<SearchResult> search(const std::vector<float>& query,
                                      const QueryOptions& opts) const {
         std::vector<SearchResult> results;

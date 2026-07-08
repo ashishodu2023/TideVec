@@ -77,12 +77,42 @@ if(TIDEVEC_CUDA)
             --use_fast_math
             -O3
     )
+    target_link_libraries(tidevec-server PRIVATE tidevec_cuda)
+    target_compile_definitions(tidevec-server PRIVATE TIDEVEC_CUDA_ENABLED)
     message(STATUS "CUDA support ENABLED (sm_80)")
 endif()
 
 # ---- XLA/TPU (optional) -----------------------------------------
 if(TIDEVEC_XLA)
-    find_library(XLA_CLIENT_LIB xla_client REQUIRED)
+    find_path(XLA_INCLUDE_DIR
+        NAMES xla/client/xla_builder.h
+        HINTS ${XLA_INCLUDE_DIR}
+        PATHS
+            /usr/local/include
+            /usr/include
+            $ENV{XLA_INCLUDE_DIR}
+    )
+    find_library(XLA_CLIENT_LIB
+        NAMES xla_client
+        HINTS ${XLA_LIB_DIR}
+        PATHS
+            /usr/local/lib
+            /usr/lib
+            $ENV{XLA_LIB_DIR}
+    )
+    if(NOT XLA_INCLUDE_DIR OR NOT XLA_CLIENT_LIB)
+        message(FATAL_ERROR
+            "TIDEVEC_XLA=ON but XLA client not found. "
+            "Set XLA_INCLUDE_DIR and XLA_LIB_DIR, or build on a TensorFlow/XLA image.")
+    endif()
+    add_library(tidevec_tpu STATIC
+            src/accelerator/tpu_kernels.cc
+    )
+    target_include_directories(tidevec_tpu PRIVATE ${XLA_INCLUDE_DIR})
+    target_link_libraries(tidevec_tpu PRIVATE ${XLA_CLIENT_LIB})
+    target_compile_definitions(tidevec_tpu PUBLIC TIDEVEC_XLA_ENABLED)
+    target_link_libraries(tidevec-server PRIVATE tidevec_tpu)
+    target_compile_definitions(tidevec-server PRIVATE TIDEVEC_XLA_ENABLED)
     message(STATUS "XLA/TPU support ENABLED")
 endif()
 
@@ -135,7 +165,7 @@ if(TIDEVEC_BUILD_TESTS)
         target_compile_definitions(tidevec_accel_tests PUBLIC TIDEVEC_CUDA_ENABLED)
     endif()
     if(TIDEVEC_XLA)
-        target_link_libraries(tidevec_accel_tests PRIVATE ${XLA_CLIENT_LIB})
+        target_link_libraries(tidevec_accel_tests PRIVATE tidevec_tpu)
         target_compile_definitions(tidevec_accel_tests PUBLIC TIDEVEC_XLA_ENABLED)
     endif()
 

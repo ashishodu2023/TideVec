@@ -38,6 +38,7 @@
 #include <tidevec/api/collection_registry.hpp>
 #include <tidevec/api/server_security.hpp>
 #include <tidevec/drift/drift_bridge.hpp>
+#include <tidevec/drift/drift_http.hpp>
 #include <tidevec/observability/otel_exporter.hpp>
 #include <tidevec/ops/backup_manager.hpp>
 
@@ -325,6 +326,33 @@ private:
         _json_response(res, err(msg, status), status);
     }
 
+    void _drift_shadow_write(const std::string& collection,
+                             const CortexVector& vec) {
+        std::lock_guard<std::mutex> lg(drift_mutex_);
+        auto it = drift_states_.find(collection);
+        if (it == drift_states_.end()) return;
+        if (it->second.bridge->phase() == DriftPhase::MIGRATING)
+            it->second.bridge->shadow_write(vec, it->second.re_embed);
+    }
+
+    void _drift_apply_shadow(const std::string& collection) {
+        std::vector<CortexVector> migrated;
+        {
+            std::lock_guard<std::mutex> lg(drift_mutex_);
+            auto it = drift_states_.find(collection);
+            if (it == drift_states_.end()) return;
+            if (auto shadow = it->second.bridge->take_shadow()) {
+                shadow->each_vector([&](const CortexVector& v) {
+                    migrated.push_back(v);
+                });
+            }
+        }
+        if (migrated.empty()) return;
+        auto& col = registry_.get(collection);
+        for (const auto& v : migrated)
+            col.upsert(v);
+    }
+
     // ---- route registration ------------------------------------
     void _register_routes() {
         // CORS preflight
@@ -435,6 +463,8 @@ private:
                 p.data_dir    = cfg_.data_dir;
                 if (j.contains("temporal"))
                     p.temporal = temporal_cfg_from_json(j["temporal"]);
+                if (j.contains("agent"))
+                    p.agent = agent_cfg_from_json(j["agent"]);
 
                 registry_.create(p);
                 otel_.export_event("info", "Collection created",
@@ -508,6 +538,7 @@ private:
                 auto process = [&](const json& item) {
                     auto v = vector_from_json(item);
                     col.upsert(v);
+                    _drift_shadow_write(name, v);
                     inserted_ids.push_back(v.id);
                     ++metrics_.vectors_inserted;
                 };
@@ -708,60 +739,65 @@ private:
                 // Check if a migration is already running
                 {
                     std::lock_guard<std::mutex> lg(drift_mutex_);
-                    if (drift_bridges_.count(name)) {
-                        auto phase = drift_bridges_[name]->phase();
+                    if (drift_states_.count(name)) {
+                        auto phase = drift_states_[name].bridge->phase();
                         if (phase == DriftPhase::MIGRATING ||
                             phase == DriftPhase::SWAPPING) {
                             _error(res, "Migration already in progress for: " + name);
                             return;
                         }
-                        drift_bridges_.erase(name);
+                        drift_states_.erase(name);
                     }
                 }
 
                 // Snapshot current vectors for migration
                 auto live_vectors = col.snapshot_vectors();
                 std::size_t total = live_vectors.size();
+                std::size_t new_dim = j.value("new_dim", 0UL);
+
+                ParsedHttpUrl parsed_url;
+                try {
+                    parsed_url = parse_http_url(reembed_url);
+                } catch (const std::exception& e) {
+                    _error(res, std::string("Invalid reembed_url: ") + e.what());
+                    return;
+                }
 
                 // Create bridge
                 auto bridge = std::make_unique<DriftBridge>(old_cfg, new_cfg);
                 auto* bridge_ptr = bridge.get();
 
-                {
-                    std::lock_guard<std::mutex> lg(drift_mutex_);
-                    drift_bridges_[name] = std::move(bridge);
-                }
-
                 // Re-embed callback: HTTP POST to caller's endpoint
-                std::string url = reembed_url;
-                ReEmbedFn re_embed = [url](
+                ReEmbedFn re_embed = [parsed_url, new_dim](
                     const std::string& id,
                     const std::unordered_map<std::string,std::string>& payload)
                     -> std::vector<float>
                 {
-                    // Build request JSON
                     json body = {{"id", id}, {"payload", payload}};
                     std::string body_str = body.dump();
-
-                    httplib::Client cli(url);
-                    auto r = cli.Post("/", body_str, "application/json");
-                    if (!r || r->status != 200) return {};
+                    std::string resp_body;
+                    if (!http_post_json(parsed_url, body_str, resp_body))
+                        return {};
 
                     try {
-                        auto rj = json::parse(r->body);
+                        auto rj = json::parse(resp_body);
                         if (!rj.contains("embedding")) return {};
-                        return rj["embedding"].get<std::vector<float>>();
+                        auto emb = rj["embedding"].get<std::vector<float>>();
+                        if (new_dim > 0 && emb.size() != new_dim) return {};
+                        return emb;
                     } catch (...) { return {}; }
                 };
 
-                // on_complete callback — swap the live index
-                auto on_complete = [this, name, &col](CortexVector) {
-                    std::lock_guard<std::mutex> lg(drift_mutex_);
-                    auto it = drift_bridges_.find(name);
-                    if (it == drift_bridges_.end()) return;
-                    auto shadow = it->second->take_shadow();
-                    if (shadow) col.swap_index(std::move(shadow));
+                // on_complete — bulk-upsert shadow vectors into all shards
+                auto on_complete = [this, name](CortexVector) {
+                    _drift_apply_shadow(name);
                 };
+
+                {
+                    std::lock_guard<std::mutex> lg(drift_mutex_);
+                    drift_states_[name] = DriftState{
+                        std::move(bridge), re_embed};
+                }
 
                 bridge_ptr->start(live_vectors, re_embed, on_complete);
 
@@ -788,8 +824,8 @@ private:
             std::string name = req.matches[1];
 
             std::lock_guard<std::mutex> lg(drift_mutex_);
-            auto it = drift_bridges_.find(name);
-            if (it == drift_bridges_.end()) {
+            auto it = drift_states_.find(name);
+            if (it == drift_states_.end()) {
                 _json_response(res, ok({
                     {"collection", name},
                     {"phase",      "IDLE"},
@@ -798,7 +834,7 @@ private:
                 return;
             }
 
-            auto prog  = it->second->progress();
+            auto prog  = it->second.bridge->progress();
             std::string phase_str;
             switch (prog.phase) {
                 case DriftPhase::IDLE:      phase_str = "IDLE";      break;
@@ -831,13 +867,13 @@ private:
             std::string name = req.matches[1];
 
             std::lock_guard<std::mutex> lg(drift_mutex_);
-            auto it = drift_bridges_.find(name);
-            if (it == drift_bridges_.end()) {
+            auto it = drift_states_.find(name);
+            if (it == drift_states_.end()) {
                 _error(res, "No migration in progress for: " + name);
                 return;
             }
-            it->second->abort();
-            drift_bridges_.erase(it);
+            it->second.bridge->abort();
+            drift_states_.erase(it);
             _json_response(res, ok({{"message", "Migration aborted"}, {"collection", name}}));
         });
 
@@ -952,8 +988,13 @@ private:
     inline static thread_local std::string tls_current_tenant;
 
     // DriftBridge state — one per collection currently migrating
+    struct DriftState {
+        std::unique_ptr<DriftBridge> bridge;
+        ReEmbedFn                      re_embed;
+    };
+
     std::mutex drift_mutex_;
-    std::unordered_map<std::string, std::unique_ptr<DriftBridge>> drift_bridges_;
+    std::unordered_map<std::string, DriftState> drift_states_;
 };
 
 } // namespace tidevec

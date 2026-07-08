@@ -50,6 +50,7 @@ public:
         bool parallel_search         = true;
         bool use_segment_store       = false;  // disk-backed vector storage
         std::size_t segment_buf_size = 100'000;
+        AgentContext agent;
     };
 
     explicit DurableCollection(Config cfg) : cfg_(std::move(cfg)) {
@@ -110,8 +111,11 @@ public:
     // ------ Write API (WAL → shard → replicas) ------------------
 
     void upsert(const CortexVector& vec) {
-        _shard_for(vec.id).upsert(vec);
-        if (segment_store_) segment_store_->put(vec);
+        CortexVector v = vec;
+        if (cfg_.agent.enabled && cfg_.agent.memory_ttl_seconds > 0)
+            v.set_ttl_seconds(cfg_.agent.memory_ttl_seconds);
+        _shard_for(v.id).upsert(v);
+        if (segment_store_) segment_store_->put(v);
         ++total_writes_;
     }
 
@@ -131,6 +135,8 @@ public:
                                      QueryOptions opts,
                                      RetrievalTrace* trace = nullptr) {
         auto t0 = std::chrono::steady_clock::now();
+
+        _purge_expired_on_shards();
 
         // Scatter-gather: each shard's ReplicaSet handles replica routing
         int global_k = opts.top_k;
@@ -219,6 +225,12 @@ public:
     }
 
 private:
+    void _purge_expired_on_shards() {
+        for (auto& rs : shard_replicas_)
+            if (auto* col = rs->primary())
+                col->purge_expired();
+    }
+
     void _build_shards() {
         shard_replicas_.reserve(cfg_.n_shards);
 
@@ -235,6 +247,7 @@ private:
             ccfg.tvindex_cfg = cfg_.tvindex;
             ccfg.tvindex_cfg.metric   = Metric::COSINE;
             ccfg.tvindex_cfg.temporal = cfg_.temporal;
+            ccfg.agent                = cfg_.agent;
 
             ReplicaSet::Config rscfg;
             rscfg.collection_cfg = ccfg;

@@ -1,11 +1,11 @@
-# tidevec-py
+# tidevec
 
 Python SDK for [TideVec](https://github.com/ashishodu2023/TideVec) — the world's first temporally-aware, causally-indexed vector database.
 
 ## Install
 
 ```bash
-pip install tidevec-py
+pip install tidevec
 ```
 
 ## Quick Start

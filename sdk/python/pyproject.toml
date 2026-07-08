@@ -8,7 +8,7 @@ version         = "0.2.0"
 description     = "Python SDK for TideVec — temporally-aware causal vector database"
 readme          = "README.md"
 license         = { text = "Apache-2.0" }
-authors         = [{ name = "Ashish Verma", email = "contact@getcortexops.com" }]
+authors         = [{ name = "Ashish Verma", email = "contact@tidevec.com" }]
 requires-python = ">=3.9"
 keywords        = ["vector-database", "embeddings", "ANN", "RAG", "agentic-AI"]
 classifiers     = [
@@ -31,10 +31,11 @@ pandas = ["pandas>=2.0"]
 dev    = ["pytest>=7", "pytest-asyncio", "black", "mypy"]
 
 [project.urls]
-Homepage      = "https://tidevec.io"
+Homepage      = "https://gettidevec.com"
 Repository    = "https://github.com/ashishodu2023/TideVec"
-Documentation = "https://tidevec.io/docs"
+Documentation = "https://gettidevec.com/docs"
 "Bug Tracker" = "https://github.com/ashishodu2023/TideVec/issues"
+PyPI          = "https://pypi.org/project/tidevec/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tidevec"]

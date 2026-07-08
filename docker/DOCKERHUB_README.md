@@ -2,12 +2,12 @@
 
 **The world's first temporally-aware causal vector database.**
 
-Published on Docker Hub as [`averm004/tidevec`](https://hub.docker.com/r/averm004/tidevec).
-
-[![Docker](https://img.shields.io/badge/Docker-averm004%2Ftidevec-blue?logo=docker)](https://hub.docker.com/r/averm004/tidevec)
-[![GitHub](https://img.shields.io/badge/GitHub-ashishodu2023%2FTideVec-blue?logo=github)](https://github.com/ashishodu2023/TideVec)
-[![Website](https://img.shields.io/badge/Website-gettidevec.com-indigo)](https://gettidevec.com)
-[![License](https://img.shields.io/badge/License-Apache_2.0-green)](https://github.com/ashishodu2023/TideVec/blob/main/LICENSE)
+| | |
+|---|---|
+| **Docker** | [hub.docker.com/r/averm004/tidevec](https://hub.docker.com/r/averm004/tidevec) |
+| **GitHub** | [github.com/ashishodu2023/TideVec](https://github.com/ashishodu2023/TideVec) |
+| **Website** | [gettidevec.com](https://gettidevec.com) |
+| **License** | [Apache 2.0](https://github.com/ashishodu2023/TideVec/blob/main/LICENSE) |
 
 ---
 
@@ -42,7 +42,7 @@ Supports A100, H100, RTX 30/40 series. Image includes CUDA 12.6 runtime; server 
 
 ### TPU — Google Cloud TPU (amd64 only)
 
-For GKE TPU nodes (v4/v5e). JAX/XLA pre-installed; full XLA matmul path ships in v0.2+.
+For GKE TPU nodes (v4/v5e). Native XLA matmul when built with libxla_client; JAX runtime included.
 
 ```bash
 docker pull averm004/tidevec:tpu

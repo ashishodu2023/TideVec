@@ -11,7 +11,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-orange)](https://en.cppreference.com/w/cpp/20)
 [![Docker](https://img.shields.io/badge/Docker-CPU%20%7C%20GPU%20%7C%20TPU-blue)](docker/)
 
-[**Docs**](https://docs.tidevec.com) · [**tidevec.com**](https://tidevec.com) · [**CortexOps**](https://getcortexops.com)
+[**Docs**](https://gettidevec.com/docs) · [**gettidevec.com**](https://gettidevec.com) · [**CortexOps**](https://getcortexops.com)
 
 </div>
 
@@ -642,6 +642,26 @@ make -j$(nproc)
 
 TideVec v0.2 ships with production-hardening enabled by default in Docker and Helm.
 
+### Self-hosted data storage
+
+All collection data, WAL segments, registry metadata, and backups live under a single directory (default `/data` in Docker, `./tidevec_data` locally):
+
+```bash
+mkdir -p "$HOME/data/tidevec"
+docker run -d -p 6399:6399 \
+  -v "$HOME/data/tidevec:/data" \
+  averm004/tidevec:latest
+```
+
+On **Apple Silicon**, use `$HOME/data/tidevec` (not `/data/tidevec` on the host). Mount the same path across restarts for durability — WAL replay restores in-memory indexes on startup.
+
+| Path under data dir | Contents |
+|---------------------|----------|
+| `registry.json` | Collection metadata |
+| `{collection}/wal/` | Write-ahead log per shard |
+| `{collection}/segments/` | Disk-backed vectors (segment store) |
+| `backups/` | Automated snapshots |
+
 ### Server features
 
 | Feature | Default (Docker) | Flag / Env |
@@ -917,13 +937,13 @@ tidevec/
 - [x] WAL group commit (1000 writes/fsync)
 - [x] Docker (CPU + GPU + TPU) + docker-compose
 - [x] GitHub Actions CI/CD + PyPI auto-publish
-- [x] tidevec.com website (Vercel)
-- [ ] DriftBridge production implementation (v0.2)
-- [ ] AgentContext TTL lifecycle policies (v0.2)
-- [ ] Helm chart for Kubernetes (v0.2)
+- [x] DriftBridge zero-downtime embedding migration
+- [x] AgentContext TTL lifecycle policies
+- [x] Helm chart for Kubernetes (`deploy/helm/tidevec`)
+- [x] `tidevec` PyPI package (auto-publish on `v*` tags)
+- [x] gettidevec.com website (Vercel)
 - [ ] Distributed Raft over gRPC (v0.3)
 - [ ] VLDB 2027 paper submission (v0.3)
-- [ ] `tidevec-py` PyPI public release (v0.1.1)
 
 ---
 
@@ -939,6 +959,6 @@ Built by [Ashish Verma](https://github.com/ashishodu2023) — Senior Data Engine
 
 *Part of the [Cortex Platform](https://getcortexops.com): CortexOps (observability) + TideVec (vector storage)*
 
-**[tidevec.com](https://tidevec.com) · [GitHub](https://github.com/ashishodu2023/TideVec) · [PyPI](https://pypi.org/project/tidevec-py/)**
+**[gettidevec.com](https://gettidevec.com) · [GitHub](https://github.com/ashishodu2023/TideVec) · [PyPI](https://pypi.org/project/tidevec/)**
 
 </div>
