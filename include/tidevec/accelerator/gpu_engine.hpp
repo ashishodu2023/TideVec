@@ -32,6 +32,7 @@
 #include <memory>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 
 // ================================================================
 // CUDA path — compiled only when CUDA is available
@@ -280,8 +281,11 @@ public:
         bool use_cosine = true;
     };
 
-    explicit CagraStyleEngine(Config cfg = Config{}, int device_id = 0)
-        : cfg_(cfg), device_id_(device_id) {}
+    explicit CagraStyleEngine(int device_id = 0)
+        : cfg_(), device_id_(device_id) {}
+
+    explicit CagraStyleEngine(Config cfg, int device_id = 0)
+        : cfg_(std::move(cfg)), device_id_(device_id) {}
 
     ~CagraStyleEngine() {
         if (d_vectors_) cudaFree(d_vectors_);
