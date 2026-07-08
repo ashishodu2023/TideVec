@@ -76,8 +76,44 @@ docker compose --profile gpu up -d
 | `0.2.0-gpu` | versioned GPU | amd64 | Pin to release |
 | `0.2.0-tpu` | versioned TPU | amd64 | Pin to release |
 | `sha-<commit>-cpu` | CI snapshot | amd64, arm64 | Exact commit (debugging) |
+| `sha-<commit>-gpu` | CI snapshot | amd64 only | Exact GPU commit (Linux NVIDIA hosts) |
 
 > **Note:** `gpu` and `tpu` are **amd64-only** and larger than CPU (~1.4 GB GPU, ~225 MB TPU). They are rebuilt on every `main` push and on version tags (`v*`).
+
+---
+
+## Apple Silicon (Mac M1/M2/M3/M4) and ARM64
+
+**Use the CPU image on Mac** — it is multi-arch (`linux/arm64` + `linux/amd64`):
+
+```bash
+docker pull averm004/tidevec:latest
+# or
+docker pull averm004/tidevec:cpu
+```
+
+**Do not pull `:gpu`, `:tpu`, or `sha-*-gpu` on Apple Silicon** unless you force amd64 emulation. Those tags are built for **Linux amd64** servers with NVIDIA GPUs or Google Cloud TPU. macOS has no CUDA runtime, so the GPU image cannot accelerate workloads locally anyway.
+
+If you see:
+
+```text
+no matching manifest for linux/arm64/v8 in the manifest list entries
+```
+
+you pulled an **amd64-only** tag on an ARM Mac. Switch to `:latest` or `:cpu`.
+
+| Your machine | Recommended tag |
+|--------------|-----------------|
+| Mac (Apple Silicon) | `latest`, `cpu` |
+| Mac (Intel) | `latest`, `cpu` |
+| Linux + NVIDIA GPU | `gpu` |
+| GKE / Cloud TPU node | `tpu` |
+
+**Optional** — pull a GPU image under amd64 emulation (slow, no real GPU; for inspect/export only):
+
+```bash
+docker pull --platform linux/amd64 averm004/tidevec:gpu
+```
 
 ---
 
