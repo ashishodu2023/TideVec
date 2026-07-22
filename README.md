@@ -54,6 +54,68 @@ Decay rate is configurable per collection via `half_life_ms`. Presets: `HalfLife
 
 ---
 
+## Benchmarks — TideVec vs Qdrant Timestamp Filter
+
+Reviewer question: *"Can't I just put a `timestamp` in Qdrant payload and filter `age <= N days`?"*
+
+**Short answer: no.** A metadata filter is a hard include/exclude. TideVec's temporal score is a continuous rerank. On a 64-document synthetic refund-policy corpus (8 topics × 4 dated versions + 32 distractors), that distinction is decisive.
+
+### Setup
+
+| | |
+|---|---|
+| **Corpus** | 64 docs — electronics / software / shipping / apparel / warranty / digital / subscription / damaged-item policies, each with 4 dated versions, plus FAQ & off-topic distractors |
+| **Queries** | 8 policy questions with a known gold *current* doc |
+| **Semantic trap** | Stale versions intentionally score **0.837** cosine vs current **0.822** (same gap as the live demo above) |
+| **TideVec** | `half_life = 7 days`, `temporal_blend β = 0.3` → `final = 0.7·cosine + 0.3·2^(−age/7)` |
+| **Qdrant baselines** | (1) cosine-only (2) hard filter `age ≤ 14d` (3) hard filter `age ≤ 30d` |
+| **Reproduce** | `python3 benchmarks/temporal_vs_qdrant/run_benchmark.py` (stdlib only) |
+
+Half the topics have a fresh current policy (1–5 days old). The other half have an *authoritative but unrevised* current policy aged 18–22 days — still the correct answer, just outside a naïve 14-day window.
+
+### Results
+
+| Strategy | Gold@1 ↑ | Stale@1 ↓ | Mean gold rank ↓ | nDCG@5 ↑ |
+|---|---:|---:|---:|---:|
+| Qdrant cosine-only | 0% | **100%** | 4.00 | 0.601 |
+| Qdrant filter ≤14d | 50% | 0% | 6.00 | 0.409 |
+| Qdrant filter ≤30d | 0% | **100%** | 2.00 | 0.633 |
+| **TideVec blend β=0.3** | **100%** | **0%** | **1.00** | **1.000** |
+
+Cohort split (Gold@1):
+
+| Strategy | Fresh current (n=4) | Current policy >14d old (n=4) |
+|---|---:|---:|
+| Qdrant cosine-only | 0% | 0% |
+| Qdrant filter ≤14d | 100% | **0%** |
+| Qdrant filter ≤30d | 0% | 0% |
+| **TideVec** | **100%** | **100%** |
+
+### What this shows
+
+```
+Qdrant cosine-only     → always returns the outdated policy (higher semantic score)
+Qdrant filter ≤14d     → works iff current doc is inside the window;
+                          silently drops authoritative policies aged 18–22d
+Qdrant filter ≤30d     → re-admits stale v3 docs that still beat current on cosine
+TideVec soft decay     → demotes stale continuously; no window to tune
+```
+
+```
+# Qdrant "equivalent" — binary, brittle
+client.search(query, filter=Filter(must=[
+    FieldCondition(key="age_days", range=Range(lte=14))  # pick a number, hope
+]))
+
+# TideVec — continuous, first-class in HNSW beam
+db.search("docs", query, temporal_blend=0.3)  # half_life set on collection
+# final_score = 0.7 × cosine + 0.3 × 2^(−age_days / 7)
+```
+
+Full methodology, per-query traces, and optional live-Qdrant validation: [`benchmarks/temporal_vs_qdrant/`](benchmarks/temporal_vs_qdrant/).
+
+---
+
 ## What Makes TideVec Novel
 
 ### 1. TVIndex — Temporal Vector Index
@@ -869,7 +931,7 @@ Target: VLDB 2027 / IEEE TKDE
 
 | Feature | TideVec | Qdrant | Milvus | Weaviate | Pinecone |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Temporal decay scoring | ✅ TVIndex | ❌ | ❌ | ❌ | ❌ |
+| Temporal decay scoring | ✅ TVIndex | ❌ (hard timestamp filter only) | ❌ | ❌ | ❌ |
 | Native causal graph | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Contradiction detection | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Zero-downtime model migration | ✅ DriftBridge | ❌ | ❌ | ❌ | ❌ |
@@ -916,6 +978,10 @@ tidevec/
 │   │                   test_accelerator.cpp, test_eleven_nines.cpp
 │   ├── integration/    test_api.cpp
 │   └── benchmarks/     bench_billion_scale.cpp
+├── benchmarks/
+│   └── temporal_vs_qdrant/   TideVec soft-decay vs Qdrant timestamp filter
+│       ├── run_benchmark.py  (stdlib-only, 64-doc refund-policy corpus)
+│       └── results/          benchmark_results.json
 ├── docker/
 │   ├── cpu/Dockerfile  Ubuntu 24.04, ~40MB final image
 │   ├── gpu/Dockerfile  CUDA 12.3, multi-stage

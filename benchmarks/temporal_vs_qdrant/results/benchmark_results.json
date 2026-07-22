@@ -1,0 +1,1571 @@
+{
+  "config": {
+    "half_life_days": 7.0,
+    "temporal_blend": 0.3,
+    "top_k": 10,
+    "n_docs": 64,
+    "n_queries": 8,
+    "embedding": "controlled_cosine_dim_128",
+    "stale_semantic": 0.837,
+    "current_semantic": 0.822,
+    "note": "Policy embeddings use controlled cosines matching the live demo (stale 0.837 > current 0.822). FAQ/distractor docs use hashed BoW."
+  },
+  "strategies": [
+    {
+      "name": "Qdrant cosine-only",
+      "gold_at_1": 0.0,
+      "stale_at_1": 1.0,
+      "mean_gold_rank": 4.0,
+      "median_gold_rank": 4.0,
+      "ndcg_at_5": 0.601,
+      "empty_result_rate": 0.0,
+      "gold_at_1_fresh_current": 0.0,
+      "gold_at_1_current_gt_14d": 0.0,
+      "per_query": [
+        {
+          "query": "q_electronics_refund",
+          "text": "What is the refund window for electronics?",
+          "top1": "electronics_refund_v1",
+          "top1_age_days": 90,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "electronics_refund_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 90
+            },
+            {
+              "id": "electronics_refund_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 45
+            },
+            {
+              "id": "electronics_refund_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 21
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.3732,
+              "semantic": 0.3732,
+              "temporal": 1.0,
+              "age_days": 2
+            }
+          ]
+        },
+        {
+          "query": "q_software_return",
+          "text": "Can I return opened software?",
+          "top1": "software_return_v1",
+          "top1_age_days": 120,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "software_return_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 120
+            },
+            {
+              "id": "software_return_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 60
+            },
+            {
+              "id": "software_return_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 28
+            },
+            {
+              "id": "software_return_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 5
+            },
+            {
+              "id": "faq_track_return",
+              "score": 0.2819,
+              "semantic": 0.2819,
+              "temporal": 1.0,
+              "age_days": 10
+            }
+          ]
+        },
+        {
+          "query": "q_shipping_refund",
+          "text": "How long do shipping fee refunds take?",
+          "top1": "shipping_refund_v1",
+          "top1_age_days": 75,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "shipping_refund_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 75
+            },
+            {
+              "id": "shipping_refund_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 40
+            },
+            {
+              "id": "shipping_refund_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 18
+            },
+            {
+              "id": "shipping_refund_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "faq_partial_refund",
+              "score": 0.2467,
+              "semantic": 0.2467,
+              "temporal": 1.0,
+              "age_days": 22
+            }
+          ]
+        },
+        {
+          "query": "q_digital_goods",
+          "text": "Are digital gift cards refundable?",
+          "top1": "digital_goods_v1",
+          "top1_age_days": 85,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "digital_goods_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 85
+            },
+            {
+              "id": "digital_goods_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 35
+            },
+            {
+              "id": "digital_goods_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 16
+            },
+            {
+              "id": "digital_goods_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 1
+            },
+            {
+              "id": "faq_partial_refund",
+              "score": 0.2239,
+              "semantic": 0.2239,
+              "temporal": 1.0,
+              "age_days": 22
+            }
+          ]
+        },
+        {
+          "query": "q_apparel_exchange",
+          "text": "What is the exchange policy for clothing?",
+          "top1": "apparel_exchange_v1",
+          "top1_age_days": 100,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "apparel_exchange_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 100
+            },
+            {
+              "id": "apparel_exchange_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 55
+            },
+            {
+              "id": "apparel_exchange_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 26
+            },
+            {
+              "id": "apparel_exchange_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 22
+            },
+            {
+              "id": "faq_tax_refund",
+              "score": 0.3454,
+              "semantic": 0.3454,
+              "temporal": 1.0,
+              "age_days": 14
+            }
+          ]
+        },
+        {
+          "query": "q_warranty_claim",
+          "text": "How do I file a product warranty claim?",
+          "top1": "warranty_claim_v1",
+          "top1_age_days": 110,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "warranty_claim_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 110
+            },
+            {
+              "id": "warranty_claim_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 50
+            },
+            {
+              "id": "warranty_claim_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 28
+            },
+            {
+              "id": "warranty_claim_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 20
+            },
+            {
+              "id": "subscription_cancel_v1",
+              "score": 0.537,
+              "semantic": 0.537,
+              "temporal": 1.0,
+              "age_days": 95
+            }
+          ]
+        },
+        {
+          "query": "q_subscription_cancel",
+          "text": "How do I cancel my subscription and get a refund?",
+          "top1": "subscription_cancel_v1",
+          "top1_age_days": 95,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "subscription_cancel_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 95
+            },
+            {
+              "id": "subscription_cancel_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 42
+            },
+            {
+              "id": "subscription_cancel_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 25
+            },
+            {
+              "id": "subscription_cancel_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 18
+            },
+            {
+              "id": "warranty_claim_v1",
+              "score": 0.4292,
+              "semantic": 0.4292,
+              "temporal": 1.0,
+              "age_days": 110
+            }
+          ]
+        },
+        {
+          "query": "q_damaged_item",
+          "text": "What if my order arrives damaged?",
+          "top1": "damaged_item_v1",
+          "top1_age_days": 70,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 4,
+          "ndcg@5": 0.601,
+          "top5": [
+            {
+              "id": "damaged_item_v1",
+              "score": 0.837,
+              "semantic": 0.837,
+              "temporal": 1.0,
+              "age_days": 70
+            },
+            {
+              "id": "damaged_item_v2",
+              "score": 0.832,
+              "semantic": 0.832,
+              "temporal": 1.0,
+              "age_days": 38
+            },
+            {
+              "id": "damaged_item_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 27
+            },
+            {
+              "id": "damaged_item_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 19
+            },
+            {
+              "id": "faq_loyalty",
+              "score": 0.1305,
+              "semantic": 0.1305,
+              "temporal": 1.0,
+              "age_days": 25
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Qdrant filter \u226414d",
+      "gold_at_1": 0.5,
+      "stale_at_1": 0.0,
+      "mean_gold_rank": 6.0,
+      "median_gold_rank": 6.0,
+      "ndcg_at_5": 0.4088,
+      "empty_result_rate": 0.0,
+      "gold_at_1_fresh_current": 1.0,
+      "gold_at_1_current_gt_14d": 0.0,
+      "per_query": [
+        {
+          "query": "q_electronics_refund",
+          "text": "What is the refund window for electronics?",
+          "top1": "electronics_refund_v4",
+          "top1_age_days": 3,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 0.8176,
+          "top5": [
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.3732,
+              "semantic": 0.3732,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "faq_tax_refund",
+              "score": 0.2601,
+              "semantic": 0.2601,
+              "temporal": 1.0,
+              "age_days": 14
+            },
+            {
+              "id": "digital_goods_v4",
+              "score": 0.1944,
+              "semantic": 0.1944,
+              "temporal": 1.0,
+              "age_days": 1
+            },
+            {
+              "id": "faq_restocking",
+              "score": 0.1936,
+              "semantic": 0.1936,
+              "temporal": 1.0,
+              "age_days": 12
+            }
+          ]
+        },
+        {
+          "query": "q_software_return",
+          "text": "Can I return opened software?",
+          "top1": "software_return_v4",
+          "top1_age_days": 5,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 0.8176,
+          "top5": [
+            {
+              "id": "software_return_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 5
+            },
+            {
+              "id": "faq_track_return",
+              "score": 0.2819,
+              "semantic": 0.2819,
+              "temporal": 1.0,
+              "age_days": 10
+            },
+            {
+              "id": "faq_wrong_item",
+              "score": 0.1581,
+              "semantic": 0.1581,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "ship_rates",
+              "score": 0.1563,
+              "semantic": 0.1563,
+              "temporal": 1.0,
+              "age_days": 4
+            },
+            {
+              "id": "faq_restocking",
+              "score": 0.0971,
+              "semantic": 0.0971,
+              "temporal": 1.0,
+              "age_days": 12
+            }
+          ]
+        },
+        {
+          "query": "q_shipping_refund",
+          "text": "How long do shipping fee refunds take?",
+          "top1": "shipping_refund_v4",
+          "top1_age_days": 2,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 0.8176,
+          "top5": [
+            {
+              "id": "shipping_refund_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "faq_refund_method",
+              "score": 0.1514,
+              "semantic": 0.1514,
+              "temporal": 1.0,
+              "age_days": 5
+            },
+            {
+              "id": "faq_tax_refund",
+              "score": 0.1316,
+              "semantic": 0.1316,
+              "temporal": 1.0,
+              "age_days": 14
+            },
+            {
+              "id": "faq_gift_return",
+              "score": 0.1268,
+              "semantic": 0.1268,
+              "temporal": 1.0,
+              "age_days": 8
+            },
+            {
+              "id": "faq_track_return",
+              "score": 0.1138,
+              "semantic": 0.1138,
+              "temporal": 1.0,
+              "age_days": 10
+            }
+          ]
+        },
+        {
+          "query": "q_digital_goods",
+          "text": "Are digital gift cards refundable?",
+          "top1": "digital_goods_v4",
+          "top1_age_days": 1,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 0.8176,
+          "top5": [
+            {
+              "id": "digital_goods_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 1
+            },
+            {
+              "id": "faq_preorder",
+              "score": 0.205,
+              "semantic": 0.205,
+              "temporal": 1.0,
+              "age_days": 7
+            },
+            {
+              "id": "store_hours",
+              "score": 0.165,
+              "semantic": 0.165,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "faq_gift_return",
+              "score": 0.1623,
+              "semantic": 0.1623,
+              "temporal": 1.0,
+              "age_days": 8
+            },
+            {
+              "id": "software_return_v4",
+              "score": 0.0,
+              "semantic": 0.0,
+              "temporal": 1.0,
+              "age_days": 5
+            }
+          ]
+        },
+        {
+          "query": "q_apparel_exchange",
+          "text": "What is the exchange policy for clothing?",
+          "top1": "faq_tax_refund",
+          "top1_age_days": 14,
+          "top1_is_gold": false,
+          "top1_is_stale": false,
+          "gold_rank": null,
+          "ndcg@5": 0.0,
+          "top5": [
+            {
+              "id": "faq_tax_refund",
+              "score": 0.3454,
+              "semantic": 0.3454,
+              "temporal": 1.0,
+              "age_days": 14
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.2013,
+              "semantic": 0.2013,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "app_ios",
+              "score": 0.152,
+              "semantic": 0.152,
+              "temporal": 1.0,
+              "age_days": 8
+            },
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.1403,
+              "semantic": 0.1403,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "faq_gift_return",
+              "score": 0.1219,
+              "semantic": 0.1219,
+              "temporal": 1.0,
+              "age_days": 8
+            }
+          ]
+        },
+        {
+          "query": "q_warranty_claim",
+          "text": "How do I file a product warranty claim?",
+          "top1": "shipping_refund_v4",
+          "top1_age_days": 2,
+          "top1_is_gold": false,
+          "top1_is_stale": false,
+          "gold_rank": null,
+          "ndcg@5": 0.0,
+          "top5": [
+            {
+              "id": "shipping_refund_v4",
+              "score": 0.188,
+              "semantic": 0.188,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "faq_track_return",
+              "score": 0.1496,
+              "semantic": 0.1496,
+              "temporal": 1.0,
+              "age_days": 10
+            },
+            {
+              "id": "app_android",
+              "score": 0.133,
+              "semantic": 0.133,
+              "temporal": 1.0,
+              "age_days": 9
+            },
+            {
+              "id": "careers",
+              "score": 0.105,
+              "semantic": 0.105,
+              "temporal": 1.0,
+              "age_days": 12
+            },
+            {
+              "id": "faq_refund_method",
+              "score": 0.1005,
+              "semantic": 0.1005,
+              "temporal": 1.0,
+              "age_days": 5
+            }
+          ]
+        },
+        {
+          "query": "q_subscription_cancel",
+          "text": "How do I cancel my subscription and get a refund?",
+          "top1": "faq_carrier_delay",
+          "top1_age_days": 2,
+          "top1_is_gold": false,
+          "top1_is_stale": false,
+          "gold_rank": null,
+          "ndcg@5": 0.0,
+          "top5": [
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.2395,
+              "semantic": 0.2395,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "shipping_refund_v4",
+              "score": 0.234,
+              "semantic": 0.234,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.1809,
+              "semantic": 0.1809,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "faq_track_return",
+              "score": 0.1747,
+              "semantic": 0.1747,
+              "temporal": 1.0,
+              "age_days": 10
+            },
+            {
+              "id": "careers",
+              "score": 0.1638,
+              "semantic": 0.1638,
+              "temporal": 1.0,
+              "age_days": 12
+            }
+          ]
+        },
+        {
+          "query": "q_damaged_item",
+          "text": "What if my order arrives damaged?",
+          "top1": "app_ios",
+          "top1_age_days": 8,
+          "top1_is_gold": false,
+          "top1_is_stale": false,
+          "gold_rank": null,
+          "ndcg@5": 0.0,
+          "top5": [
+            {
+              "id": "app_ios",
+              "score": 0.1237,
+              "semantic": 0.1237,
+              "temporal": 1.0,
+              "age_days": 8
+            },
+            {
+              "id": "faq_gift_return",
+              "score": 0.0992,
+              "semantic": 0.0992,
+              "temporal": 1.0,
+              "age_days": 8
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.0832,
+              "semantic": 0.0832,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "faq_track_return",
+              "score": 0.0544,
+              "semantic": 0.0544,
+              "temporal": 1.0,
+              "age_days": 10
+            },
+            {
+              "id": "software_return_v4",
+              "score": 0.0,
+              "semantic": 0.0,
+              "temporal": 1.0,
+              "age_days": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Qdrant filter \u226430d",
+      "gold_at_1": 0.0,
+      "stale_at_1": 1.0,
+      "mean_gold_rank": 2.0,
+      "median_gold_rank": 2.0,
+      "ndcg_at_5": 0.6327,
+      "empty_result_rate": 0.0,
+      "gold_at_1_fresh_current": 0.0,
+      "gold_at_1_current_gt_14d": 0.0,
+      "per_query": [
+        {
+          "query": "q_electronics_refund",
+          "text": "What is the refund window for electronics?",
+          "top1": "electronics_refund_v3",
+          "top1_age_days": 21,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "electronics_refund_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 21
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.3732,
+              "semantic": 0.3732,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "faq_tax_refund",
+              "score": 0.2601,
+              "semantic": 0.2601,
+              "temporal": 1.0,
+              "age_days": 14
+            },
+            {
+              "id": "apparel_exchange_v3",
+              "score": 0.2491,
+              "semantic": 0.2491,
+              "temporal": 1.0,
+              "age_days": 26
+            }
+          ]
+        },
+        {
+          "query": "q_software_return",
+          "text": "Can I return opened software?",
+          "top1": "software_return_v3",
+          "top1_age_days": 28,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "software_return_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 28
+            },
+            {
+              "id": "software_return_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 5
+            },
+            {
+              "id": "faq_track_return",
+              "score": 0.2819,
+              "semantic": 0.2819,
+              "temporal": 1.0,
+              "age_days": 10
+            },
+            {
+              "id": "faq_wrong_item",
+              "score": 0.1581,
+              "semantic": 0.1581,
+              "temporal": 1.0,
+              "age_days": 3
+            },
+            {
+              "id": "faq_student",
+              "score": 0.1565,
+              "semantic": 0.1565,
+              "temporal": 1.0,
+              "age_days": 20
+            }
+          ]
+        },
+        {
+          "query": "q_shipping_refund",
+          "text": "How long do shipping fee refunds take?",
+          "top1": "shipping_refund_v3",
+          "top1_age_days": 18,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "shipping_refund_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 18
+            },
+            {
+              "id": "shipping_refund_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 2
+            },
+            {
+              "id": "faq_partial_refund",
+              "score": 0.2467,
+              "semantic": 0.2467,
+              "temporal": 1.0,
+              "age_days": 22
+            },
+            {
+              "id": "faq_international",
+              "score": 0.1665,
+              "semantic": 0.1665,
+              "temporal": 1.0,
+              "age_days": 30
+            },
+            {
+              "id": "acct_2fa",
+              "score": 0.1599,
+              "semantic": 0.1599,
+              "temporal": 1.0,
+              "age_days": 15
+            }
+          ]
+        },
+        {
+          "query": "q_digital_goods",
+          "text": "Are digital gift cards refundable?",
+          "top1": "digital_goods_v3",
+          "top1_age_days": 16,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "digital_goods_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 16
+            },
+            {
+              "id": "digital_goods_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 1
+            },
+            {
+              "id": "faq_partial_refund",
+              "score": 0.2239,
+              "semantic": 0.2239,
+              "temporal": 1.0,
+              "age_days": 22
+            },
+            {
+              "id": "faq_bundle",
+              "score": 0.2105,
+              "semantic": 0.2105,
+              "temporal": 1.0,
+              "age_days": 16
+            },
+            {
+              "id": "faq_preorder",
+              "score": 0.205,
+              "semantic": 0.205,
+              "temporal": 1.0,
+              "age_days": 7
+            }
+          ]
+        },
+        {
+          "query": "q_apparel_exchange",
+          "text": "What is the exchange policy for clothing?",
+          "top1": "apparel_exchange_v3",
+          "top1_age_days": 26,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "apparel_exchange_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 26
+            },
+            {
+              "id": "apparel_exchange_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 22
+            },
+            {
+              "id": "faq_tax_refund",
+              "score": 0.3454,
+              "semantic": 0.3454,
+              "temporal": 1.0,
+              "age_days": 14
+            },
+            {
+              "id": "electronics_refund_v3",
+              "score": 0.2047,
+              "semantic": 0.2047,
+              "temporal": 1.0,
+              "age_days": 21
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.2013,
+              "semantic": 0.2013,
+              "temporal": 1.0,
+              "age_days": 3
+            }
+          ]
+        },
+        {
+          "query": "q_warranty_claim",
+          "text": "How do I file a product warranty claim?",
+          "top1": "warranty_claim_v3",
+          "top1_age_days": 28,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "warranty_claim_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 28
+            },
+            {
+              "id": "warranty_claim_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 20
+            },
+            {
+              "id": "subscription_cancel_v3",
+              "score": 0.5345,
+              "semantic": 0.5345,
+              "temporal": 1.0,
+              "age_days": 25
+            },
+            {
+              "id": "subscription_cancel_v4",
+              "score": 0.5332,
+              "semantic": 0.5332,
+              "temporal": 1.0,
+              "age_days": 18
+            },
+            {
+              "id": "faq_loyalty",
+              "score": 0.2286,
+              "semantic": 0.2286,
+              "temporal": 1.0,
+              "age_days": 25
+            }
+          ]
+        },
+        {
+          "query": "q_subscription_cancel",
+          "text": "How do I cancel my subscription and get a refund?",
+          "top1": "subscription_cancel_v3",
+          "top1_age_days": 25,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "subscription_cancel_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 25
+            },
+            {
+              "id": "subscription_cancel_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 18
+            },
+            {
+              "id": "warranty_claim_v3",
+              "score": 0.4237,
+              "semantic": 0.4237,
+              "temporal": 1.0,
+              "age_days": 28
+            },
+            {
+              "id": "warranty_claim_v4",
+              "score": 0.421,
+              "semantic": 0.421,
+              "temporal": 1.0,
+              "age_days": 20
+            },
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.2395,
+              "semantic": 0.2395,
+              "temporal": 1.0,
+              "age_days": 2
+            }
+          ]
+        },
+        {
+          "query": "q_damaged_item",
+          "text": "What if my order arrives damaged?",
+          "top1": "damaged_item_v3",
+          "top1_age_days": 27,
+          "top1_is_gold": false,
+          "top1_is_stale": true,
+          "gold_rank": 2,
+          "ndcg@5": 0.6327,
+          "top5": [
+            {
+              "id": "damaged_item_v3",
+              "score": 0.827,
+              "semantic": 0.827,
+              "temporal": 1.0,
+              "age_days": 27
+            },
+            {
+              "id": "damaged_item_v4",
+              "score": 0.822,
+              "semantic": 0.822,
+              "temporal": 1.0,
+              "age_days": 19
+            },
+            {
+              "id": "faq_loyalty",
+              "score": 0.1305,
+              "semantic": 0.1305,
+              "temporal": 1.0,
+              "age_days": 25
+            },
+            {
+              "id": "app_ios",
+              "score": 0.1237,
+              "semantic": 0.1237,
+              "temporal": 1.0,
+              "age_days": 8
+            },
+            {
+              "id": "faq_partial_refund",
+              "score": 0.1148,
+              "semantic": 0.1148,
+              "temporal": 1.0,
+              "age_days": 22
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TideVec blend \u03b2=0.3",
+      "gold_at_1": 1.0,
+      "stale_at_1": 0.0,
+      "mean_gold_rank": 1.0,
+      "median_gold_rank": 1.0,
+      "ndcg_at_5": 1.0,
+      "empty_result_rate": 0.0,
+      "gold_at_1_fresh_current": 1.0,
+      "gold_at_1_current_gt_14d": 1.0,
+      "per_query": [
+        {
+          "query": "q_electronics_refund",
+          "text": "What is the refund window for electronics?",
+          "top1": "electronics_refund_v4",
+          "top1_age_days": 3,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.7983,
+              "semantic": 0.822,
+              "temporal": 0.743,
+              "age_days": 3
+            },
+            {
+              "id": "electronics_refund_v3",
+              "score": 0.6164,
+              "semantic": 0.827,
+              "temporal": 0.125,
+              "age_days": 21
+            },
+            {
+              "id": "electronics_refund_v1",
+              "score": 0.5859,
+              "semantic": 0.837,
+              "temporal": 0.0001,
+              "age_days": 90
+            },
+            {
+              "id": "electronics_refund_v2",
+              "score": 0.5859,
+              "semantic": 0.832,
+              "temporal": 0.0116,
+              "age_days": 45
+            },
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.5073,
+              "semantic": 0.3732,
+              "temporal": 0.8203,
+              "age_days": 2
+            }
+          ]
+        },
+        {
+          "query": "q_software_return",
+          "text": "Can I return opened software?",
+          "top1": "software_return_v4",
+          "top1_age_days": 5,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "software_return_v4",
+              "score": 0.7583,
+              "semantic": 0.822,
+              "temporal": 0.6095,
+              "age_days": 5
+            },
+            {
+              "id": "software_return_v3",
+              "score": 0.5977,
+              "semantic": 0.827,
+              "temporal": 0.0625,
+              "age_days": 28
+            },
+            {
+              "id": "software_return_v1",
+              "score": 0.5859,
+              "semantic": 0.837,
+              "temporal": 0.0,
+              "age_days": 120
+            },
+            {
+              "id": "software_return_v2",
+              "score": 0.5832,
+              "semantic": 0.832,
+              "temporal": 0.0026,
+              "age_days": 60
+            },
+            {
+              "id": "faq_wrong_item",
+              "score": 0.3336,
+              "semantic": 0.1581,
+              "temporal": 0.743,
+              "age_days": 3
+            }
+          ]
+        },
+        {
+          "query": "q_shipping_refund",
+          "text": "How long do shipping fee refunds take?",
+          "top1": "shipping_refund_v4",
+          "top1_age_days": 2,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "shipping_refund_v4",
+              "score": 0.8215,
+              "semantic": 0.822,
+              "temporal": 0.8203,
+              "age_days": 2
+            },
+            {
+              "id": "shipping_refund_v3",
+              "score": 0.6294,
+              "semantic": 0.827,
+              "temporal": 0.1682,
+              "age_days": 18
+            },
+            {
+              "id": "shipping_refund_v2",
+              "score": 0.5881,
+              "semantic": 0.832,
+              "temporal": 0.019,
+              "age_days": 40
+            },
+            {
+              "id": "shipping_refund_v1",
+              "score": 0.5861,
+              "semantic": 0.837,
+              "temporal": 0.0006,
+              "age_days": 75
+            },
+            {
+              "id": "acct_password",
+              "score": 0.3338,
+              "semantic": 0.0887,
+              "temporal": 0.9057,
+              "age_days": 1
+            }
+          ]
+        },
+        {
+          "query": "q_digital_goods",
+          "text": "Are digital gift cards refundable?",
+          "top1": "digital_goods_v4",
+          "top1_age_days": 1,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "digital_goods_v4",
+              "score": 0.8471,
+              "semantic": 0.822,
+              "temporal": 0.9057,
+              "age_days": 1
+            },
+            {
+              "id": "digital_goods_v3",
+              "score": 0.6404,
+              "semantic": 0.827,
+              "temporal": 0.2051,
+              "age_days": 16
+            },
+            {
+              "id": "digital_goods_v2",
+              "score": 0.5918,
+              "semantic": 0.832,
+              "temporal": 0.0312,
+              "age_days": 35
+            },
+            {
+              "id": "digital_goods_v1",
+              "score": 0.586,
+              "semantic": 0.837,
+              "temporal": 0.0002,
+              "age_days": 85
+            },
+            {
+              "id": "store_hours",
+              "score": 0.3384,
+              "semantic": 0.165,
+              "temporal": 0.743,
+              "age_days": 3
+            }
+          ]
+        },
+        {
+          "query": "q_apparel_exchange",
+          "text": "What is the exchange policy for clothing?",
+          "top1": "apparel_exchange_v4",
+          "top1_age_days": 22,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "apparel_exchange_v4",
+              "score": 0.6094,
+              "semantic": 0.822,
+              "temporal": 0.1132,
+              "age_days": 22
+            },
+            {
+              "id": "apparel_exchange_v3",
+              "score": 0.6018,
+              "semantic": 0.827,
+              "temporal": 0.0762,
+              "age_days": 26
+            },
+            {
+              "id": "apparel_exchange_v1",
+              "score": 0.5859,
+              "semantic": 0.837,
+              "temporal": 0.0001,
+              "age_days": 100
+            },
+            {
+              "id": "apparel_exchange_v2",
+              "score": 0.5837,
+              "semantic": 0.832,
+              "temporal": 0.0043,
+              "age_days": 55
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.3638,
+              "semantic": 0.2013,
+              "temporal": 0.743,
+              "age_days": 3
+            }
+          ]
+        },
+        {
+          "query": "q_warranty_claim",
+          "text": "How do I file a product warranty claim?",
+          "top1": "warranty_claim_v4",
+          "top1_age_days": 20,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "warranty_claim_v4",
+              "score": 0.6168,
+              "semantic": 0.822,
+              "temporal": 0.138,
+              "age_days": 20
+            },
+            {
+              "id": "warranty_claim_v3",
+              "score": 0.5977,
+              "semantic": 0.827,
+              "temporal": 0.0625,
+              "age_days": 28
+            },
+            {
+              "id": "warranty_claim_v1",
+              "score": 0.5859,
+              "semantic": 0.837,
+              "temporal": 0.0,
+              "age_days": 110
+            },
+            {
+              "id": "warranty_claim_v2",
+              "score": 0.5845,
+              "semantic": 0.832,
+              "temporal": 0.0071,
+              "age_days": 50
+            },
+            {
+              "id": "subscription_cancel_v4",
+              "score": 0.4237,
+              "semantic": 0.5332,
+              "temporal": 0.1682,
+              "age_days": 18
+            }
+          ]
+        },
+        {
+          "query": "q_subscription_cancel",
+          "text": "How do I cancel my subscription and get a refund?",
+          "top1": "subscription_cancel_v4",
+          "top1_age_days": 18,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "subscription_cancel_v4",
+              "score": 0.6259,
+              "semantic": 0.822,
+              "temporal": 0.1682,
+              "age_days": 18
+            },
+            {
+              "id": "subscription_cancel_v3",
+              "score": 0.6041,
+              "semantic": 0.827,
+              "temporal": 0.0841,
+              "age_days": 25
+            },
+            {
+              "id": "subscription_cancel_v2",
+              "score": 0.5871,
+              "semantic": 0.832,
+              "temporal": 0.0156,
+              "age_days": 42
+            },
+            {
+              "id": "subscription_cancel_v1",
+              "score": 0.5859,
+              "semantic": 0.837,
+              "temporal": 0.0001,
+              "age_days": 95
+            },
+            {
+              "id": "faq_carrier_delay",
+              "score": 0.4137,
+              "semantic": 0.2395,
+              "temporal": 0.8203,
+              "age_days": 2
+            }
+          ]
+        },
+        {
+          "query": "q_damaged_item",
+          "text": "What if my order arrives damaged?",
+          "top1": "damaged_item_v4",
+          "top1_age_days": 19,
+          "top1_is_gold": true,
+          "top1_is_stale": false,
+          "gold_rank": 1,
+          "ndcg@5": 1.0,
+          "top5": [
+            {
+              "id": "damaged_item_v4",
+              "score": 0.6211,
+              "semantic": 0.822,
+              "temporal": 0.1524,
+              "age_days": 19
+            },
+            {
+              "id": "damaged_item_v3",
+              "score": 0.5996,
+              "semantic": 0.827,
+              "temporal": 0.069,
+              "age_days": 27
+            },
+            {
+              "id": "damaged_item_v2",
+              "score": 0.5894,
+              "semantic": 0.832,
+              "temporal": 0.0232,
+              "age_days": 38
+            },
+            {
+              "id": "damaged_item_v1",
+              "score": 0.5862,
+              "semantic": 0.837,
+              "temporal": 0.001,
+              "age_days": 70
+            },
+            {
+              "id": "electronics_refund_v4",
+              "score": 0.2811,
+              "semantic": 0.0832,
+              "temporal": 0.743,
+              "age_days": 3
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
