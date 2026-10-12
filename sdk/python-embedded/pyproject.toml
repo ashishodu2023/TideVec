@@ -1,0 +1,29 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name            = "tidevec-embedded"
+version         = "0.3.0"
+description     = "In-process TideVec engine — run TideVec inside Python with no server"
+readme          = "README.md"
+license         = { text = "Apache-2.0" }
+authors         = [{ name = "Ashish Verma", email = "contact@tidevec.com" }]
+requires-python = ">=3.9"
+dependencies    = ["numpy>=1.24"]
+classifiers     = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+]
+
+[project.urls]
+Homepage   = "https://tidevec.com"
+Repository = "https://github.com/ashishodu2023/TideVec"
+
+[tool.scikit-build]
+cmake.version = ">=3.20"
+wheel.packages = []
+sdist.include = ["include/**"]

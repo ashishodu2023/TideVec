@@ -1,3 +1,4 @@
+{{- include "tidevec.validate" . }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -5,8 +6,9 @@ metadata:
   labels:
     {{- include "tidevec.labels" . | nindent 4 }}
 spec:
-  serviceName: {{ include "tidevec.fullname" . }}
+  serviceName: {{ include "tidevec.headlessName" . }}
   replicas: {{ .Values.replicaCount }}
+  podManagementPolicy: {{ ternary "Parallel" "OrderedReady" .Values.cluster.enabled }}
   selector:
     matchLabels:
       {{- include "tidevec.selectorLabels" . | nindent 6 }}
@@ -14,16 +16,35 @@ spec:
     metadata:
       labels:
         {{- include "tidevec.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
-      serviceAccountName: {{ include "tidevec.fullname" . }}
+      serviceAccountName: {{ include "tidevec.serviceAccountName" . }}
+      # A Service named "tidevec" would inject TIDEVEC_PORT=tcp://... and clash with the server's env config.
+      enableServiceLinks: false
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: tidevec
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: {{ include "tidevec.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           ports:
             - name: http
               containerPort: 6399
@@ -35,25 +56,78 @@ spec:
             - name: TIDEVEC_API_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "tidevec.fullname" . }}-secret
-                  key: api-key
+                  name: {{ include "tidevec.secretName" . }}
+                  key: {{ include "tidevec.secretKey" . }}
+            {{- if .Values.cluster.enabled }}
+            - name: TIDEVEC_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['apps.kubernetes.io/pod-index']
+            - name: TIDEVEC_CLUSTER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "tidevec.secretName" . }}
+                  key: {{ ternary .Values.secrets.existingSecretClusterKey "cluster-secret" (ne .Values.secrets.existingSecret "") }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: backups
+              mountPath: /backups
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.tls.enabled }}
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            {{- end }}
+          {{- if .Values.probes.startup.enabled }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+              scheme: {{ ternary "HTTPS" "HTTP" .Values.tls.enabled }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 20
-            periodSeconds: 15
+              scheme: {{ ternary "HTTPS" "HTTP" .Values.tls.enabled }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
           readinessProbe:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
+              scheme: {{ ternary "HTTPS" "HTTP" .Values.tls.enabled }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.tls.enabled }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+            defaultMode: 0440
+        {{- end }}
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        {{- if not .Values.backup.persistence.enabled }}
+        - name: backups
+          emptyDir: {}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -66,17 +140,40 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-  {{- if .Values.persistence.enabled }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if or .Values.persistence.enabled .Values.backup.persistence.enabled }}
   volumeClaimTemplates:
+    {{- if .Values.persistence.enabled }}
     - metadata:
         name: data
+        {{- with .Values.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
       spec:
         accessModes:
           - {{ .Values.persistence.accessMode }}
         resources:
           requests:
             storage: {{ .Values.persistence.size }}
-        {{- if .Values.persistence.storageClass }}
-        storageClassName: {{ .Values.persistence.storageClass }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
         {{- end }}
+    {{- end }}
+    {{- if .Values.backup.persistence.enabled }}
+    - metadata:
+        name: backups
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: {{ .Values.backup.persistence.size }}
+        {{- with .Values.backup.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+    {{- end }}
   {{- end }}

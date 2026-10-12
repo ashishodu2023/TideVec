@@ -1,6 +1,9 @@
 # TideVec
 
-**The world's first temporally-aware causal vector database.**
+**A vector database for RAG and AI agents over knowledge that changes.**
+
+Time-aware ranking inside the HNSW search, automatic detection of superseded document versions, and
+typed links (`UPDATES`, `CONTRADICTS`, `CAUSES`, ...) stored next to the vectors.
 
 | | |
 |---|---|
@@ -11,166 +14,133 @@
 
 ---
 
-## Quick Start
+## Quick start (CPU)
 
-### CPU — any machine (Linux, Mac, Windows/WSL)
-
-Multi-arch: **linux/amd64** + **linux/arm64** (Apple Silicon).
-
-```bash
-docker pull averm004/tidevec:latest
-docker run -d \
-  -p 6399:6399 \
-  -v "$(pwd)/data:/data" \
-  averm004/tidevec:latest
-```
-
-### GPU — NVIDIA (CUDA runtime, amd64 only)
-
-Requires [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+Multi-arch: **linux/amd64** (x86-64-v3: Haswell or newer, AVX2 + FMA) and **linux/arm64** (Apple
+Silicon via Docker Desktop).
 
 ```bash
-docker pull averm004/tidevec:gpu
-docker run -d --gpus all \
-  -p 6399:6399 \
-  -v "$(pwd)/data:/data" \
-  -e TIDEVEC_DEVICE=gpu \
-  averm004/tidevec:gpu
+export TIDEVEC_API_KEY="your-secret-key"
+docker run -d -p 6399:6399 -e TIDEVEC_API_KEY \
+  -v tidevec_data:/data -v tidevec_backups:/backups averm004/tidevec:latest
 ```
 
-Supports A100, H100, RTX 30/40 series. Image includes CUDA 12.6 runtime; server starts with `--device gpu`.
-
-### TPU — Google Cloud TPU (amd64 only)
-
-For GKE TPU nodes (v4/v5e). Native XLA matmul when built with libxla_client; JAX runtime included.
+Auth is **on** by default. If you don't set `TIDEVEC_API_KEY`, the container generates one and prints
+it in the logs (`docker logs <container>`). Send it as `X-Api-Key` on `/v1/*` requests.
 
 ```bash
-docker pull averm004/tidevec:tpu
-docker run -d \
-  -p 6399:6399 \
-  -v "$(pwd)/data:/data" \
-  -e TIDEVEC_DEVICE=tpu \
-  averm004/tidevec:tpu
+curl -s http://localhost:6399/health
+curl -s -H "X-Api-Key: $TIDEVEC_API_KEY" http://localhost:6399/v1/collections
 ```
-
-### Full observability stack
-
-```bash
-curl -O https://raw.githubusercontent.com/ashishodu2023/TideVec/main/docker/docker-compose.yml
-docker compose up -d
-# Optional GPU profile:
-docker compose --profile gpu up -d
-```
-
----
-
-## Available Tags
-
-| Tag | Image | Arch | Description |
-|-----|-------|------|-------------|
-| `latest`, `cpu` | `averm004/tidevec:latest` | amd64, arm64 | CPU-only server (default) |
-| `gpu` | `averm004/tidevec:gpu` | amd64 | CUDA 12.6 runtime, `--device gpu` |
-| `tpu` | `averm004/tidevec:tpu` | amd64 | JAX/XLA base for Cloud TPU |
-| `0.2.0-cpu` | versioned CPU | amd64, arm64 | Pin to release |
-| `0.2.0-gpu` | versioned GPU | amd64 | Pin to release |
-| `0.2.0-tpu` | versioned TPU | amd64 | Pin to release |
-| `sha-<commit>-cpu` | CI snapshot | amd64, arm64 | Exact commit (debugging) |
-| `sha-<commit>-gpu` | CI snapshot | amd64 only | Exact GPU commit (Linux NVIDIA hosts) |
-
-> **Note:** `gpu` and `tpu` are **amd64-only** and larger than CPU (~1.4 GB GPU, ~225 MB TPU). They are rebuilt on every `main` push and on version tags (`v*`).
-
----
-
-## Apple Silicon (Mac M1/M2/M3/M4) and ARM64
-
-**Use the CPU image on Mac** — it is multi-arch (`linux/arm64` + `linux/amd64`):
-
-```bash
-docker pull averm004/tidevec:latest
-# or
-docker pull averm004/tidevec:cpu
-```
-
-**Do not pull `:gpu`, `:tpu`, or `sha-*-gpu` on Apple Silicon** unless you force amd64 emulation. Those tags are built for **Linux amd64** servers with NVIDIA GPUs or Google Cloud TPU. macOS has no CUDA runtime, so the GPU image cannot accelerate workloads locally anyway.
-
-If you see:
-
-```text
-no matching manifest for linux/arm64/v8 in the manifest list entries
-```
-
-you pulled an **amd64-only** tag on an ARM Mac. Switch to `:latest` or `:cpu`.
-
-| Your machine | Recommended tag |
-|--------------|-----------------|
-| Mac (Apple Silicon) | `latest`, `cpu` |
-| Mac (Intel) | `latest`, `cpu` |
-| Linux + NVIDIA GPU | `gpu` |
-| GKE / Cloud TPU node | `tpu` |
-
-**Optional** — pull a GPU image under amd64 emulation (slow, no real GPU; for inspect/export only):
-
-```bash
-docker pull --platform linux/amd64 averm004/tidevec:gpu
-```
-
----
-
-## Verify
-
-```bash
-curl -s http://localhost:6399/health | jq .
-curl -s http://localhost:6399/v1/info   | jq .
-```
-
----
-
-## Python SDK
 
 ```python
-from tidevec import TideVec, HalfLife
+from tidevec import TideVec, HalfLife      # pip install tidevec
 
-db = TideVec("http://localhost:6399")
-db.create_collection("docs", dim=768, half_life_ms=HalfLife.ONE_WEEK)
-db.upsert("docs", [{"id": "v1", "embedding": [...], "payload": {"src": "wiki"}}])
+db = TideVec("localhost:6399")              # reads TIDEVEC_API_KEY
+db.create_collection("docs", dim=768, half_life_ms=HalfLife.ONE_MONTH,
+                     supersession=True, supersede_match_field="doc_id")
+db.upsert("docs", [{"id": "refunds-v2", "embedding": vec, "payload": {"doc_id": "refunds"}}])
 
-for hit in db.search("docs", query, top_k=10, temporal_blend=0.3):
-    print(hit.id, hit.score, hit.temporal_score)
+for hit in db.search("docs", query, top_k=5, superseded_penalty=1.0):
+    print(hit.id, hit.score, hit.superseded_by)
 ```
 
+No server needed for local use: `pip install "tidevec[embedded]"` and `tidevec.Local("./data")`.
+
 ---
 
-## Configuration
+## Configuration (all images)
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `TIDEVEC_PORT` | `6399` | REST API port |
-| `TIDEVEC_DATA_DIR` | `/data` | Persistent data directory |
-| `TIDEVEC_THREADS` | `8` | Worker threads |
-| `TIDEVEC_DEVICE` | `auto` | `auto` \| `cpu` \| `gpu` \| `tpu` |
-| `TIDEVEC_API_KEY` | *(empty)* | API key; set to enable auth |
-| `TIDEVEC_REQUIRE_AUTH` | `false` | Require `X-Api-Key` on all endpoints |
+|---|---|---|
+| `TIDEVEC_API_KEY` | generated | API key |
+| `TIDEVEC_REQUIRE_AUTH` | `1` | `0` disables auth, even if `TIDEVEC_API_KEY` is set (local testing only) |
+| `TIDEVEC_ULTRA_DURABLE` | `1` | RS(10,4) segments, WAL group commit, health monitor, in-process Raft log |
+| `TIDEVEC_SEGMENT_STORE` | `1` | disk-backed vector segments |
+| `TIDEVEC_BACKUP` | `0` | `1` takes a snapshot of `/data` periodically (newest 48 kept) |
+| `TIDEVEC_BACKUP_INTERVAL_HOURS` | `6` | hours between snapshots |
+| `TIDEVEC_BACKUP_DIR` | `/backups` | snapshot directory; keep it outside `/data` |
+| `TIDEVEC_BACKUP_S3` / `TIDEVEC_BACKUP_GCS` | unset | also upload snapshots to `s3://...` / `gs://...`; needs the `aws` / `gsutil` CLI, which the image does not include |
+| `TIDEVEC_MULTI_TENANT` | `0` | `1` accepts per-tenant keys from `/data/tenants.json`; each tenant only sees its own collections |
+| `TIDEVEC_RATE_LIMIT` | `100` | requests per second per client |
+| `TIDEVEC_OTEL_ENDPOINT` | unset | enables JSON event logs and OTLP trace export |
+| `TIDEVEC_REEMBED_ALLOW` | unset | hosts DriftBridge may call to re-embed (`a.com,b.com`) |
+| `TIDEVEC_REEMBED_ALLOW_PRIVATE` | `0` | `1` lets listed hosts be private/loopback addresses |
+| `TIDEVEC_LOG_LEVEL` | `info` | `debug`/`info` log every request; `warn`/`error` do not (`TIDEVEC_QUIET=1` is the same) |
+| `TIDEVEC_TLS_CERT` / `TIDEVEC_TLS_KEY` | unset | PEM certificate and key: serve HTTPS on 6399 (set both) |
+| `TIDEVEC_THREADS` / `TIDEVEC_DEVICE` / `TIDEVEC_PORT` / `TIDEVEC_DATA_DIR` | `8` / `cpu` / `6399` / `/data` | |
 
-Production flags (also via CLI): `--ultra-durable`, `--segment-store`, `--backup`, `--multi-tenant`, `--otel`.
+Only port **6399** (REST) is served: plain HTTP, or HTTPS with `TIDEVEC_TLS_CERT` and
+`TIDEVEC_TLS_KEY` pointing at mounted PEM files (`-v ./tls:/tls:ro -e TIDEVEC_TLS_CERT=/tls/tls.crt
+-e TIDEVEC_TLS_KEY=/tls/tls.key`). Extra arguments after the image name are passed to the server.
+
+**Rotating the API key:** change `TIDEVEC_API_KEY` and restart; the old key stops working.
+
+### Durability, honestly
+
+Every write goes to a CRC-checked write-ahead log under `/data` and is replayed on restart. The
+RS(10,4) erasure coding models at 8.7 nines **across independent disks** (0.4% annual failure, no
+repair), but a single container keeps every shard on **one volume**, so that volume is your failure
+domain. Enable backups (`TIDEVEC_BACKUP=1`), copy `/backups` off the host, and keep `/data` on
+durable storage. To restore, stop the container and extract a snapshot into the data volume
+(`tar -xzf tidevec_<ts>.tar.gz -C <volume> --strip-components=1`); the restore API cannot replace a
+mounted `/data`.
+
+### Experimental: replicated cluster
+
+Three or more containers can replicate writes with Raft over HTTP:
+
+```bash
+-e TIDEVEC_NODE_ID=0 \
+-e TIDEVEC_RAFT_PEERS="0=http://node0:6399,1=http://node1:6399,2=http://node2:6399" \
+-e TIDEVEC_CLUSTER_SECRET=...
+```
+
+The leader accepts writes; followers answer `421` with the leader's address (the SDKs follow it), and
+serve possibly slightly stale reads. Every node holds a full copy; there are no log snapshots or
+membership changes yet, and DriftBridge is disabled. Not for production.
 
 ---
 
-## What Makes TideVec Different
+## Tags
 
-- **TVIndex** — HNSW with Ebbinghaus temporal decay. Fresh vectors rank higher automatically.
-- **CausalEdge** — Native typed-edge graph (CAUSES, CONTRADICTS, UPDATES). No separate Neo4j.
-- **GPU CAGRA** — CUDA warp-level beam search (33–77× faster than CPU HNSW at ~95% recall).
-- **TPU XLA** — Exact batch matmul path for highest throughput on Google TPU pods.
-- **RS(10,4)** — Reed–Solomon erasure coding for 11-nines durability.
-- **Raft** — Multi-node consensus with sub-150 ms failover.
-- **RetrievalTrace** — OTel-compatible per-query trace with staleness warnings.
+| Tag | Arch | Description |
+|---|---|---|
+| `latest`, `cpu` | amd64, arm64 | newest stable release, CPU server (recommended) |
+| `0.3.0`, `0.3.0-cpu`, `0.3`, `0.3-cpu` | amd64, arm64 | pinned release / latest patch of a minor release |
+| `gpu`, `0.3.0-gpu`, `0.3-gpu` | amd64 | CUDA 12 runtime, starts with `--device gpu` (fixed flags; only `TIDEVEC_API_KEY` from the table above applies, and it is required) |
+| `tpu`, `0.3.0-tpu`, `0.3-tpu` | amd64 | JAX/XLA base, starts with `--device tpu` (same note) |
+| `main`, `sha-<commit>` (`-gpu`/`-tpu` suffixes for the accelerator images) | | builds of the main branch, not releases |
+
+Pre-releases (`0.4.0-rc1`) get their own version tags only and never move `latest`, `cpu` or `0.x`.
+
+The GPU path is an independent CUDA implementation of the CAGRA search design (Ootomo et al.,
+ICDE 2024), not NVIDIA cuVS. It has not been benchmarked or validated on GPU hardware in CI; use the
+CPU image unless you are testing it. On Apple Silicon use `latest`/`cpu`. The GPU/TPU tags are
+amd64-only (`no matching manifest for linux/arm64` means you pulled one of them).
+
+---
+
+## What's inside
+
+- **Recency-aware HNSW:** `final = (1 − β)·similarity + β·2^(−age/half_life)` used during the search;
+  `β` per collection, overridable per query.
+- **Supersession:** new versions are linked to the ones they replace at write time; results carry
+  `superseded_by` and superseded versions can be demoted.
+- **Typed edges:** contradiction checks and causal expansion in the same query.
+- **Delete by id or filter**, payload equality filters applied during traversal.
+- **DriftBridge:** re-embed a live collection with a new model in the background.
+- **Integrations:** LangChain, LlamaIndex, and an MCP memory server (`tidevec-mcp`) for Claude Desktop
+  and Cursor.
+
+On 270 real Wikipedia revisions, plain cosine returned an outdated version for 55-85% of queries;
+TideVec with supersession returned the current version and kept outdated versions out of the top 5.
+Recency weighting alone matched a recency rerank, no better. Details:
+[benchmarks/temporal_real_data](https://github.com/ashishodu2023/TideVec/tree/main/benchmarks/temporal_real_data).
 
 ---
 
 ## Links
 
-- 🐳 [Docker Hub — averm004/tidevec](https://hub.docker.com/r/averm004/tidevec)
-- 🌐 [tidevec.com](https://tidevec.com)
-- 📚 [Documentation](https://docs.tidevec.com)
-- ⭐ [GitHub — TideVec](https://github.com/ashishodu2023/TideVec)
-- 💬 [contact@tidevec.com](mailto:contact@tidevec.com)
+- [GitHub](https://github.com/ashishodu2023/TideVec) · [Examples](https://github.com/ashishodu2023/TideVec/tree/main/examples) · [Roadmap](https://github.com/ashishodu2023/TideVec/blob/main/ROADMAP.md)
+- [tidevec.com](https://tidevec.com) · [contact@tidevec.com](mailto:contact@tidevec.com)

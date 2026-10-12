@@ -1,26 +1,31 @@
-TideVec has been deployed.
+TideVec {{ .Chart.AppVersion }} has been deployed as {{ include "tidevec.fullname" . }}.
 
-1. Get the API URL:
+1. Reach the API:
 {{- if .Values.ingress.enabled }}
 {{- range $host := .Values.ingress.hosts }}
   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}
 {{- end }}
 {{- else }}
-  kubectl port-forward svc/{{ include "tidevec.fullname" . }} 6399:{{ .Values.service.port }}
-  Then connect to http://localhost:6399
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "tidevec.fullname" . }} 6399:{{ .Values.service.port }}
+  In-cluster: {{ include "tidevec.scheme" . }}://{{ include "tidevec.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
 {{- end }}
 
-2. Retrieve your API key:
-  kubectl get secret {{ include "tidevec.fullname" . }}-secret -o jsonpath='{.data.api-key}' | base64 -d
+2. API key{{ if .Values.secrets.existingSecret }} (from your Secret {{ .Values.secrets.existingSecret }}){{ end }}:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "tidevec.secretName" . }} \
+    -o jsonpath='{.data.{{ include "tidevec.secretKey" . }}}' | base64 -d
 
-3. Test health (no auth):
-  curl http://localhost:6399/health
+3. Check it:
+  curl {{ if .Values.tls.enabled }}-k {{ end }}{{ include "tidevec.scheme" . }}://localhost:6399/health
+  curl {{ if .Values.tls.enabled }}-k {{ end }}-H "X-Api-Key: $TIDEVEC_API_KEY" {{ include "tidevec.scheme" . }}://localhost:6399/v1/collections
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-4. Test authenticated request:
-  curl -H "X-Api-Key: YOUR_KEY" http://localhost:6399/v1/collections
+Settings: auth={{ .Values.config.requireAuth }} tls={{ .Values.tls.enabled }} ultra-durable={{ .Values.config.ultraDurable }} segment-store={{ .Values.config.segmentStore }} backups={{ .Values.backup.enabled }}{{ if not .Values.backup.persistence.enabled }} (emptyDir — set backup.persistence.enabled or backup.s3Uri to keep them){{ end }}
+{{- if not .Values.persistence.enabled }}
 
-Production features enabled:
-  Ultra-durable:  {{ .Values.config.ultraDurable }}
-  Segment store:  {{ .Values.config.segmentStore }}
-  Backups:        {{ .Values.config.backup }}
-  Auth required:  {{ .Values.config.requireAuth }}
+WARNING: persistence.enabled=false — data is lost when the pod restarts.
+{{- end }}
+{{- if .Values.cluster.enabled }}
+
+EXPERIMENTAL cluster mode: {{ .Values.replicaCount }} Raft nodes. Send writes to the leader
+(GET /v1/cluster/status); followers answer 421 with the leader's in-cluster URL.
+{{- end }}

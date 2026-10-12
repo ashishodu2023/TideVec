@@ -17,12 +17,12 @@
 
 FROM tensorflow/tensorflow:latest AS builder
 
-ARG VERSION=0.2.0
+ARG VERSION=0.3.0
 
 WORKDIR /build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake ninja-build \
+    cmake ninja-build libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY CMakeLists.txt .
@@ -39,7 +39,9 @@ RUN XLA_INC=$(dirname "$(dirname "$(dirname "$(find /usr/local -name xla_builder
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_STANDARD=20 \
         -DTIDEVEC_BUILD_TESTS=OFF \
+        -DTIDEVEC_MARCH=x86-64-v3 \
         -DTIDEVEC_XLA=ON \
+        -DTIDEVEC_TLS=ON \
         -DXLA_INCLUDE_DIR="$XLA_INC" \
         -DXLA_LIB_DIR="$XLA_LIB" \
         -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG" \
@@ -50,7 +52,9 @@ RUN XLA_INC=$(dirname "$(dirname "$(dirname "$(find /usr/local -name xla_builder
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_STANDARD=20 \
         -DTIDEVEC_BUILD_TESTS=OFF \
+        -DTIDEVEC_MARCH=x86-64-v3 \
         -DTIDEVEC_XLA=OFF \
+        -DTIDEVEC_TLS=ON \
         -DCMAKE_CXX_FLAGS="-O3 -DNDEBUG" \
         -GNinja; \
     fi && \
@@ -60,7 +64,7 @@ RUN XLA_INC=$(dirname "$(dirname "$(dirname "$(find /usr/local -name xla_builder
 # ── Runtime with JAX ─────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 
-ARG VERSION=0.2.0
+ARG VERSION=0.3.0
 ARG BUILD_DATE
 ARG GIT_SHA
 
@@ -77,7 +81,7 @@ LABEL maintainer="contact@tidevec.com"
 RUN groupadd -r tidevec && useradd -r -g tidevec -s /sbin/nologin tidevec
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libstdc++6 libgcc-s1 ca-certificates curl \
+    libstdc++6 libgcc-s1 libssl3 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
@@ -85,25 +89,28 @@ RUN pip install --no-cache-dir \
     "jaxlib>=0.4.25"
 
 COPY --from=builder /build/build/tidevec-server /usr/local/bin/tidevec-server
+COPY docker/cpu/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-RUN mkdir -p /data && chown tidevec:tidevec /data
+RUN mkdir -p /data /backups && chown tidevec:tidevec /data /backups
 
-EXPOSE 6399 6400
+EXPOSE 6399
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -sf http://localhost:6399/health || exit 1
+    CMD scheme=http; [ -z "$TIDEVEC_TLS_CERT" ] || scheme=https; \
+        curl -sfk "$scheme://localhost:${TIDEVEC_PORT:-6399}/health" || exit 1
 
 USER tidevec
-VOLUME ["/data"]
+VOLUME ["/data", "/backups"]
 
 ENV TIDEVEC_HOST=0.0.0.0
 ENV TIDEVEC_PORT=6399
 ENV TIDEVEC_DATA_DIR=/data
 ENV TIDEVEC_THREADS=8
 ENV TIDEVEC_DEVICE=tpu
+ENV TIDEVEC_LOG_LEVEL=info
 ENV TPU_NAME=""
 ENV CLOUD_TPU_TASK_ID=0
 
-ENTRYPOINT ["/usr/local/bin/tidevec-server"]
-CMD ["--host", "0.0.0.0", "--port", "6399", \
-     "--data-dir", "/data", "--threads", "8", "--device", "tpu"]
+# Same environment variables as the CPU image (see docker/cpu/entrypoint.sh).
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

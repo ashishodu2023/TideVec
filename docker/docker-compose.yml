@@ -13,6 +13,7 @@ services:
       - "6399:6399"
     volumes:
       - tidevec_data:/data
+      - tidevec_backups:/backups
     environment:
       - TIDEVEC_THREADS=8
       - TIDEVEC_DEVICE=auto
@@ -21,8 +22,9 @@ services:
       - TIDEVEC_SEGMENT_STORE=1
       - TIDEVEC_API_KEY=${TIDEVEC_API_KEY:-}
       - TIDEVEC_BACKUP=${TIDEVEC_BACKUP:-1}
-      - TIDEVEC_BACKUP_DIR=/data/backups
-      - TIDEVEC_OTEL_ENDPOINT=${TIDEVEC_OTEL_ENDPOINT:-http://jaeger:4318/v1/traces}
+      - TIDEVEC_BACKUP_DIR=/backups
+      # With --profile monitoring, set TIDEVEC_OTEL_ENDPOINT=http://jaeger:4318/v1/traces
+      - TIDEVEC_OTEL_ENDPOINT=${TIDEVEC_OTEL_ENDPOINT:-}
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:6399/health"]
       interval: 15s
@@ -124,6 +126,7 @@ services:
 
 volumes:
   tidevec_data:
+  tidevec_backups:
   tidevec_gpu_data:
   prometheus_data:
   grafana_data:

@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name            = "tidevec"
-version         = "0.2.1"
-description     = "Python SDK for TideVec — temporally-aware causal vector database"
+version         = "0.3.0"
+description     = "Python SDK for TideVec — the vector database that knows when facts change"
 readme          = "README.md"
 license         = { text = "Apache-2.0" }
 authors         = [{ name = "Ashish Verma", email = "contact@tidevec.com" }]
 requires-python = ">=3.9"
-keywords        = ["vector-database", "embeddings", "ANN", "RAG", "agentic-AI"]
+keywords        = ["vector-database", "embeddings", "ANN", "RAG", "agentic-AI",
+                   "agent-memory", "mcp", "langchain", "llamaindex", "temporal"]
 classifiers     = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -20,20 +21,33 @@ classifiers     = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Database",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = []
 
 [project.optional-dependencies]
-numpy  = ["numpy>=1.24"]
-pandas = ["pandas>=2.0"]
-dev    = ["pytest>=7", "pytest-asyncio", "black", "mypy"]
+numpy      = ["numpy>=1.24"]
+pandas     = ["pandas>=2.0"]
+embedded   = ["tidevec-embedded>=0.3.0"]
+langchain  = ["langchain-core>=0.3"]
+llamaindex = ["llama-index-core>=0.12"]
+mcp        = ["mcp>=1.2"]
+haystack   = ["haystack-ai>=2.9"]
+dspy       = ["dspy>=2.6"]
+langgraph  = ["langgraph>=0.4"]
+crewai     = ["crewai>=1.10"]
+all        = ["tidevec[embedded,langchain,llamaindex,mcp]"]
+dev        = ["pytest>=7", "pytest-asyncio", "black", "mypy"]
+
+[project.scripts]
+tidevec-mcp = "tidevec.mcp_server:main"
 
 [project.urls]
 Homepage      = "https://tidevec.com"
 Repository    = "https://github.com/ashishodu2023/TideVec"
-Documentation = "https://tidevec.com/docs"
+Documentation = "https://github.com/ashishodu2023/TideVec#readme"
 "Bug Tracker" = "https://github.com/ashishodu2023/TideVec/issues"
 PyPI          = "https://pypi.org/project/tidevec/"
 

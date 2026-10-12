@@ -1,0 +1,59 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.ashishodu2023/tidevec",
+  "title": "TideVec Memory",
+  "description": "Long-term agent memory that knows when facts change: newer memories supersede older ones.",
+  "websiteUrl": "https://tidevec.com",
+  "repository": {
+    "url": "https://github.com/ashishodu2023/TideVec",
+    "source": "github",
+    "subfolder": "packaging/pypi/tidevec-mcp"
+  },
+  "version": "0.3.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "tidevec-mcp",
+      "version": "0.3.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--embedder",
+          "description": "Embedding backend: auto, hashing, openai or sentence-transformers",
+          "default": "auto",
+          "choices": ["auto", "hashing", "openai", "sentence-transformers"],
+          "isRequired": false
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "TIDEVEC_URL",
+          "description": "host:port of a tidevec-server. Leave unset to use an embedded database.",
+          "isRequired": false
+        },
+        {
+          "name": "TIDEVEC_API_KEY",
+          "description": "API key for the tidevec-server (server mode only).",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "TIDEVEC_MEMORY_PATH",
+          "description": "Directory of the embedded database (default ~/.tidevec/memory).",
+          "isRequired": false
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "Enables OpenAI embeddings when sentence-transformers is not installed.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

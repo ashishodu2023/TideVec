@@ -1,0 +1,31 @@
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "tidevec.fullname" . }}
+  labels:
+    {{- include "tidevec.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "tidevec.selectorLabels" . | nindent 6 }}
+    matchExpressions:
+      - key: tidevec.com/headless
+        operator: DoesNotExist
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.monitoring.serviceMonitor.interval }}
+      {{- if .Values.tls.enabled }}
+      scheme: https
+      tlsConfig:
+        {{- with .Values.monitoring.serviceMonitor.tlsConfig }}
+        {{- toYaml . | nindent 8 }}
+        {{- else }}
+        insecureSkipVerify: true
+        {{- end }}
+      {{- end }}
+{{- end }}

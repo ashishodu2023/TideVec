@@ -1,0 +1,53 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "tidevec.fullname" . }}-test-connection
+  labels:
+    {{- include "tidevec.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: smoke
+      image: curlimages/curl:8.10.1
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      env:
+        - name: TIDEVEC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "tidevec.secretName" . }}
+              key: {{ include "tidevec.secretKey" . }}
+      command: ["sh", "-ec"]
+      args:
+        - |
+          base={{ include "tidevec.scheme" . }}://{{ include "tidevec.fullname" . }}:{{ .Values.service.port }}
+          {{- if .Values.tls.enabled }}
+          # The certificate is issued for the public name, not the Service.
+          curl() { command curl -k "$@"; }
+          {{- end }}
+          curl -fsS "$base/health"
+          echo
+          # Authenticated round trip: create, upsert, search, drop.
+          c=helm_test_$(date +%s)
+          h="X-Api-Key: $TIDEVEC_API_KEY"
+          curl -fsS -H "$h" -H 'Content-Type: application/json' \
+            -d "{\"name\":\"$c\",\"dim\":3}" "$base/v1/collections" >/dev/null
+          curl -fsS -H "$h" -H 'Content-Type: application/json' \
+            -d '{"vectors":[{"id":"a","embedding":[1,0,0],"payload":{"t":"x"}}]}' \
+            "$base/v1/collections/$c/upsert" >/dev/null
+          curl -fsS -H "$h" -H 'Content-Type: application/json' \
+            -d '{"vector":[1,0,0],"top_k":1}' "$base/v1/collections/$c/search" | grep -Eq '"id": *"a"'
+          curl -fsS -H "$h" -X DELETE "$base/v1/collections/$c" >/dev/null
+          echo "TideVec smoke test passed"
