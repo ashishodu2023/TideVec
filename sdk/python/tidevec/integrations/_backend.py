@@ -2,9 +2,9 @@
 Shared plumbing for the framework adapters (Haystack, LangGraph, CrewAI).
 
 Those frameworks need get-by-id, listing and rich filters. Current
-servers and embedded builds provide them (``get_many``, ``scroll``,
-filtered ``count``/``delete`` and JSON filters); against 0.3.0 servers or
-older native modules the backend falls back to enumerating a collection
+servers and embedded builds (0.3.0+) provide them (``get_many``, ``scroll``,
+filtered ``count``/``delete`` and JSON filters); against older servers or
+native modules the backend falls back to enumerating a collection
 with an exhaustive search and evaluating filters client-side, which only
 suits small collections (thousands of vectors).
 
@@ -181,7 +181,7 @@ class Backend:
                 self.db.scroll(self.collection, limit=1, with_payload=False)
                 self._structured = True
             except (AttributeError, NotImplementedError, TypeError, CollectionNotFoundError):
-                # Old client/native module, or a 0.3.0 server answering 404 for /scroll.
+                # Old client/native module, or a pre-0.3.0 server answering 404 for /scroll.
                 self._structured = False
             except APIError as e:
                 if e.status not in (400, 404, 405):

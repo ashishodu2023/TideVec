@@ -68,6 +68,7 @@ Non-2xx responses throw `TideVecException` (an `IOException`) with `status()`, `
     `SearchOptions.temporalBlend` is a nullable `Float` (unset means the collection's setting), and
     `deleteVectors` returns the number removed.
 
-!!! info "Not in the Java SDK yet"
-    JSON filters, `as_of`, hybrid search, get-by-id, scroll and aliases are REST-only for now
-    ([details](../concepts/filters.md)).
+Retrieval and the other 0.3.0 APIs: `get`, `scroll`, `listIds`, `count` (with filter / `as_of`),
+`setAlias` / `deleteAlias` / `listAliases`, `compact` / `compactionStatus`; `SearchOptions` carries
+structured filters, `as_of` and hybrid text queries. See
+[Retrieval, filters, as-of and hybrid](../concepts/filters.md).

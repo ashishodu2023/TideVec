@@ -19,8 +19,8 @@ filters down to TideVec and returns similarity scores in ``[0, 1]``.
 Limitations:
     * Listing, scope/category statistics and filtered deletes scan the
       matching records. With the retrieval-completeness REST API this is a
-      paged server-side scan; against older servers and embedded mode it
-      enumerates the collection, which only suits small memories.
+      paged server-side scan; against servers and native modules before
+      0.3.0 it enumerates the collection, which only suits small memories.
     * Scope prefixes are pushed down for the first 8 path components.
 """
 

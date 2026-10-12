@@ -36,7 +36,7 @@ current version of every article is about 1.5 years old.)
 What this shows:
 
 - **Plain similarity returns stale content most of the time:** an outdated version was the top hit for
-  55-85% of queries across the query sets and scenarios.
+  55–85% of queries across the query sets and scenarios.
 - **TideVec's in-search blend ranked exactly like a rerank with the same formula.** Its advantage is
   operational (one stage, no candidate-pool size, recency applied to filtered searches), not accuracy.
 - **Hard time filters fail when the window is wrong:** one year was perfect for fresh content and
@@ -59,14 +59,72 @@ linking. Full per-query-set numbers are in
 uses hand-set similarities to reproduce one failure mode. It is a demonstration, not evidence; use the
 real-data benchmark for claims.
 
-## In progress
+## Temporal benchmark v2: more corpora, natural queries, decay baselines
 
-!!! info "No published results yet"
-    ANN recall and throughput (`benchmarks/ann`), GPU (`benchmarks/gpu`), agent memory
-    (`benchmarks/agent_memory`) and a larger temporal benchmark with natural queries
-    (`benchmarks/temporal_v2`) are being built. Until each has a README and committed results, there
-    are **no** TideVec throughput, latency, recall-at-scale or GPU numbers to quote.
-    <!-- TODO(docs): link each benchmark here once its README and results are committed. -->
+[`benchmarks/temporal_v2`](https://github.com/ashishodu2023/TideVec/tree/main/benchmarks/temporal_v2)
+([summary](https://github.com/ashishodu2023/TideVec/blob/main/benchmarks/temporal_v2/results/summary.md)):
+Wikipedia policy/guideline leads (628 documents, 185 titles) and PyPI READMEs (492 documents,
+128 titles), 2-5 dated versions each, three embedding models (all-MiniLM-L6-v2, bge-small-en-v1.5,
+jina-embeddings-v2-small-en), template plus hand-written natural-language queries. The Qdrant decay
+formulas and Milvus decay rankers are reimplemented as documented over a top-100 cosine prefetch;
+they are not live Qdrant or Milvus instances.
+
+Current@1, all query sets pooled, averaged over the three models:
+
+| Strategy | policy, today | policy, as of mid-2025 | docs, today | docs, as of mid-2025 |
+|---|---:|---:|---:|---:|
+| cosine | 32.5% | 32.0% | 32.8% | 34.6% |
+| best Qdrant/Milvus decay | 77.0% | 69.6% | 82.9% | 72.9% |
+| TideVec recency blend 0.3 | 58.6% | 60.9% | 67.0% | 10.0% |
+| supersession by key, no recency | **82.8%** | **82.1%** | **90.0%** | **91.4%** |
+
+- Supersession by document key had the highest Current@1 in every corpus and scenario (on two of
+  the natural-query subsets a hard 1-2 year filter tied it).
+- **Recency weighting is fragile:** with a 365-day half-life the 0.3 blend fell to 10.0% on the docs
+  corpus as of mid-2025 (current versions were a median 580 days old), far below plain cosine. The
+  best decay formulas also lost 7-10 points between scenarios.
+
+## Agent memory: LongMemEval knowledge-update
+
+[`benchmarks/agent_memory`](https://github.com/ashishodu2023/TideVec/tree/main/benchmarks/agent_memory)
+stores every user turn of each LongMemEval-S (cleaned) knowledge-update haystack as a memory dated by
+its session, then asks the question at its question date. Retrieval only, no LLM reader; 72
+questions, k = 5, `bge-small-en-v1.5`.
+
+| Strategy | current@1 | stale@1 | stale in top-5 |
+|---|---:|---:|---:|
+| plain vector store | 0.250 | 0.278 | 0.931 |
+| cosine top-50 + recency rerank | 0.389 | 0.069 | 0.306 |
+| `AgentMemory` (defaults: blend 0.2, supersede 0.95) | 0.389 | 0.042 | 0.208 |
+| `AgentMemory` + oracle key (upper bound) | 0.403 | 0.000 | 0.000 |
+
+One embedding model; mem0 and Zep have not been compared yet.
+
+## ANN: SIFT-1M and GloVe-100 vs. hnswlib and FAISS
+
+[`benchmarks/ann`](https://github.com/ashishodu2023/TideVec/tree/main/benchmarks/ann)
+([summary](https://github.com/ashishodu2023/TideVec/blob/main/benchmarks/ann/results/summary.md)):
+M = 16, ef_construction = 200, k = 10, 10,000 queries, single-threaded unless noted.
+
+| | TideVec | hnswlib | FAISS HNSW |
+|---|---:|---:|---:|
+| SIFT-1M, QPS at recall@10 ≥ 0.95 | 2,656 | 11,401 | 5,074 |
+| SIFT-1M, QPS at recall@10 ≥ 0.99 | 1,185 | 4,149 | 3,046 |
+| SIFT-1M, build (1 thread) | 1,767 s | 231 s | 547 s |
+| GloVe-100 (1.18M), QPS at recall@10 ≥ 0.9 | 351 | 2,111 | 2,058 |
+| GloVe-100, build (1 thread) | 2,497 s | 375 s | 331 s |
+
+**TideVec trails both libraries:** 3.5-6× lower QPS than hnswlib at equal recall, about 7× slower to
+build than hnswlib (its insert path is single-threaded) and 1.5-1.9× the index memory. Its value is in what it
+ranks (recency, supersession, filters), not raw ANN speed.
+
+## GPU: not usable
+
+[`benchmarks/gpu`](https://github.com/ashishodu2023/TideVec/tree/main/benchmarks/gpu/README.md) ran the
+CUDA engines against NVIDIA cuVS on an RTX 4060 Ti. The CAGRA-style graph engine returned essentially
+random results (recall@10 0.003 on GloVe-1.2M) and the cuBLAS brute-force engine was not exact
+(0.9945) and 4× slower than cuVS brute force. The CUDA path is unsupported until it is rewritten or
+replaced by cuVS.
 
 ## Scale projections
 

@@ -79,7 +79,7 @@ Full numbers for every query set are in [`results/results.json`](results/results
 ## What this shows
 
 1. **Plain similarity returns stale content most of the time.** On real revisions, cosine picked an
-   outdated version for 55-86% of queries, and about 3-4 of the top 5 results were outdated versions.
+   outdated version for 55–85% of queries, and about 3-4 of the top 5 results were outdated versions.
    Older lead sections are often shorter and more "definitional", so they match questions well.
 2. **Any recency signal fixes the top hit, and TideVec's in-search blend is not more accurate than a
    rerank.** It produced exactly the same rankings as a top-50 rerank with the same formula. The

@@ -71,7 +71,7 @@ converts other types the same way the integrations do.
 resp = db.search(
     "kb", query_vec, top_k=10,
     temporal_blend=None,              # None = collection setting; 0.0 = pure similarity
-    filter="lang=en",                 # single key=value equality
+    filter="lang=en",                 # or a filter dict, see Concepts > Retrieval, filters
     superseded_penalty=1.0,           # push superseded versions to the bottom
     mode="vector_only",               # or "contradiction_check", "causal_expand"
     ef_search=128, include_trace=False, include_staleness_warnings=True,
@@ -84,10 +84,14 @@ db.search_one("kb", query_vec)        # top hit or None
 db.batch_search("kb", [q1, q2])       # sequential searches
 ```
 
-!!! info "Not in the Python SDK yet"
-    The server's REST API is gaining JSON filters, `as_of`, hybrid (BM25) search, get-by-id, scroll
-    and aliases ([details](../concepts/filters.md)). The Python client does not wrap them yet.
-    <!-- TODO(docs): document the Python methods once the Phase 1 SDK work lands. -->
+`search` also takes `filter` as a dict (`{"price": {"$lt": 20}}`), `as_of=` (ms, ISO-8601 string
+or `datetime`) and `text=` for BM25 keyword or hybrid search (`hybrid="rrf"|"weighted"`, `alpha`).
+
+## Retrieval, aliases and compaction
+
+`get`, `get_many`, `scroll`, `iterate`, `list_ids`, `count(filter=, as_of=)`, `delete(ids, filter=)`,
+`set_alias` / `delete_alias` / `list_aliases`, `compact` / `compaction_status`. Same methods on
+`TideVec` and `Local`; see [Retrieval, filters, as-of and hybrid](../concepts/filters.md).
 
 ## Server-only methods
 

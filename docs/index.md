@@ -33,7 +33,7 @@ as a **REST server** (`docker run averm004/tidevec`), with clients for Python, G
 
 On 270 real Wikipedia revisions of 55 articles ([benchmark](benchmarks.md)):
 
-- Plain similarity returned an outdated version as the top hit for 55-85% of queries.
+- Plain similarity returned an outdated version as the top hit for 55–85% of queries.
 - Recency weighting fixed the top hit, but TideVec's in-search blend ranked **exactly the same as a
   rerank** with the same formula. Its advantage there is operational (one stage, works with filters),
   not accuracy.
@@ -44,6 +44,6 @@ On 270 real Wikipedia revisions of 55 articles ([benchmark](benchmarks.md)):
 
 TideVec is young. Established engines (Qdrant, Milvus, Weaviate, Pinecone) are far ahead on scale,
 operations and ecosystem. Today TideVec runs as a single server or embedded library; a replicated
-[cluster mode](operations/cluster.md) is experimental, and the GPU/TPU paths are not validated on
-hardware. The [roadmap](https://github.com/ashishodu2023/TideVec/blob/main/ROADMAP.md) lists what is
+[cluster mode](operations/cluster.md) is experimental, the GPU path failed recall on real hardware
+and is unsupported, and the TPU path is not validated on hardware. The [roadmap](https://github.com/ashishodu2023/TideVec/blob/main/ROADMAP.md) lists what is
 planned and in what order.

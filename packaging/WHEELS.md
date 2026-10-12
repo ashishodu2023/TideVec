@@ -80,7 +80,20 @@ Notes:
   `*-musllinux_1_2_aarch64.whl`, `*-macosx_13_0_x86_64.whl` (cibuildwheel
   rounds 13.3 to `13_0` in the tag).
 
-## Not changed here
+## Applied
 
-`ci.yml`/`release.yml` belong to the release worker, so these changes are
-documented rather than applied. Nothing has been built or published.
+These changes are in `ci.yml` and `release.yml`, using the `macos-14`
+cross-compile variant because `macos-13` runners are retired:
+
+- Both: `CIBW_ARCHS_MACOS: "x86_64 arm64"` with
+  `CIBW_TEST_SKIP: "*-macosx_x86_64"` (the Intel wheel is built but not
+  tested), musllinux_1_2 images, and `CIBW_TEST_COMMAND_LINUX` running the
+  smoke test plus `pytest sdk/python/tests -k local`.
+- `release.yml` builds musllinux on every release, and an
+  `install-check-musl` job installs the freshly built wheels in
+  `python:3.9-alpine` and `python:3.13-alpine` and runs the quickstart and
+  smoke test before anything is uploaded to PyPI.
+- `ci.yml` builds musllinux only on the nightly schedule to keep PR
+  builds short.
+
+Nothing has been published yet; no musl wheel has been built outside CI.

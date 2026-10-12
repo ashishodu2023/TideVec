@@ -25,7 +25,7 @@ LangChain tools for any LangGraph agent.
 Limitations:
     * Value filters are evaluated client-side over a candidate set fetched
       by namespace prefix; without the retrieval-completeness REST API
-      (servers before 0.4, embedded mode) listing enumerates the
+      (servers and native modules before 0.3.0) listing enumerates the
       collection, so keep those collections small.
     * Namespace prefixes are matched up to ``max_namespace_depth`` (8)
       labels on the server; deeper prefixes are completed client-side.

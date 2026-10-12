@@ -68,7 +68,7 @@ nav:
       - Supersession: concepts/supersession.md
       - Edges and contradictions: concepts/edges.md
       - Staleness signals: concepts/staleness.md
-      - Filters, as-of and hybrid search: concepts/filters.md
+      - Retrieval, filters, as-of and hybrid: concepts/filters.md
   - REST API reference: api/rest.md
   - SDKs:
       - Python: sdks/python.md
@@ -80,6 +80,7 @@ nav:
       - LangChain: integrations/langchain.md
       - LlamaIndex: integrations/llamaindex.md
       - Agent memory and MCP: integrations/mcp.md
+      - Haystack, DSPy, LangGraph, CrewAI, AI SDK, n8n: integrations/frameworks.md
   - Operations:
       - Deployment: operations/deployment.md
       - Auth, tenants and limits: operations/auth.md

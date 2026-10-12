@@ -57,7 +57,5 @@ builds a small knowledge base in which two policies were revised and compares th
 would receive from a plain similarity retriever with TideVec's. It runs offline with hashing
 embeddings, or with `--openai`.
 
-!!! note "More integrations in progress"
-    Haystack, DSPy and LangGraph adapters are being added under `tidevec.integrations` on `main`.
-    They are not part of this release and are not documented yet.
-    <!-- TODO(docs): add pages when the Phase 4 integrations ship. -->
+Haystack, LangGraph, CrewAI, DSPy, the Vercel AI SDK and n8n are covered in
+[other frameworks](frameworks.md).
