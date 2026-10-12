@@ -8,7 +8,8 @@ package io.tidevec;
  * of the nested record.
  *
  * Valid {@code type} values match the server's EdgeType enum:
- * CAUSES, CONTRADICTS, UPDATES, RELATED_TO, ENTITY_OF, SUPPORTS.
+ * CAUSES, CONTRADICTS, UPDATES, RELATED_TO, ENTITY_OF, SUPPORTS,
+ * SUPERSEDED_BY. Pass a list of these to {@link TideVecClient#addEdges}.
  */
 public final class Edge {
     private final String src;
