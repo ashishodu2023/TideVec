@@ -61,6 +61,7 @@ enum EdgeType {
   RELATED_TO  = 3;
   ENTITY_OF   = 4;
   SUPPORTS    = 5;
+  SUPERSEDED_BY = 6;  // reverse of UPDATES; maintained by the server
 }
 
 enum Device {
@@ -89,6 +90,14 @@ message AgentContext {
   bool   enabled                 = 5;
 }
 
+// Automatic newer-version detection on upsert.
+message SupersessionConfig {
+  bool   enabled              = 1;
+  float  similarity_threshold = 2;  // default 0.92
+  string match_field          = 3;  // payload key that must match, e.g. "doc_id"
+  uint32 candidates           = 4;  // neighbours compared per upsert, default 5
+}
+
 message CollectionInfo {
   string         name       = 1;
   uint64         n_vectors  = 2;
@@ -109,6 +118,7 @@ message CreateCollectionRequest {
   uint32         write_quorum = 7;
   TemporalConfig temporal     = 8;
   AgentContext   agent        = 9;
+  SupersessionConfig supersession = 10;
 }
 message CreateCollectionResponse { string name = 1; string status = 2; }
 
@@ -172,6 +182,7 @@ message SearchOptions {
   bool      include_staleness_warnings = 8;
   uint32    ef_search                  = 9;
   Device    device_hint                = 10;
+  float     superseded_penalty         = 11;  // 0 = annotate only, 1 = sink
 }
 
 message StalenessWarning {
@@ -212,6 +223,7 @@ message SearchResult {
   string              staleness_reason = 8;
   repeated string     causal_neighbors = 9;
   repeated string     contradicted_by  = 10;
+  repeated string     superseded_by    = 11;
 }
 
 message SearchRequest {

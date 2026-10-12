@@ -35,6 +35,7 @@
 #include <mutex>
 #include <vector>
 #include <iostream>
+#include <memory>
 
 namespace tidevec {
 
@@ -66,7 +67,7 @@ struct DriftProgress {
     }
 };
 
-class DriftBridge {
+class DriftBridge : public std::enable_shared_from_this<DriftBridge> {
 public:
     explicit DriftBridge(TVIndexConfig old_cfg, TVIndexConfig new_cfg)
         : old_cfg_(std::move(old_cfg))
@@ -104,8 +105,11 @@ public:
         shadow_index_ = std::make_unique<TVIndex>(new_cfg_);
 
         // Background migration thread
-        migration_thread_ = std::thread([this, live_vectors,
-                                         re_embed_fn, on_complete]() {
+        // Must be owned by a shared_ptr: the detached thread keeps the
+        // bridge alive after abort() removes it from the server's map.
+        migration_thread_ = std::thread([this, self = shared_from_this(),
+                                         live_vectors, re_embed_fn,
+                                         on_complete]() {
             std::cout << "[DriftBridge] Starting migration of "
                       << live_vectors.size() << " vectors\n";
 
@@ -122,7 +126,13 @@ public:
 
                     CortexVector nv = v;
                     nv.embedding = std::move(new_emb);
-                    shadow_index_->insert(nv);
+                    {
+                        // A live write mirrored by shadow_write() is newer
+                        // than this snapshot copy and must win.
+                        std::lock_guard<std::mutex> sg(shadow_mutex_);
+                        if (!shadow_index_->contains(nv.id))
+                            shadow_index_->insert(nv);
+                    }
 
                     std::lock_guard<std::mutex> lg(progress_mutex_);
                     ++progress_.migrated;
@@ -172,7 +182,8 @@ public:
             if (new_emb.empty()) return;
             CortexVector nv = v;
             nv.embedding = std::move(new_emb);
-            shadow_index_->insert(nv);
+            std::lock_guard<std::mutex> sg(shadow_mutex_);
+            shadow_index_->upsert(nv);
         } catch (...) {}
     }
 
@@ -196,6 +207,7 @@ private:
     std::thread migration_thread_;
     mutable std::mutex progress_mutex_;
     DriftProgress progress_;
+    std::mutex shadow_mutex_;
 };
 
 } // namespace tidevec

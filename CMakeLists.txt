@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(TideVec VERSION 0.1.0 LANGUAGES CXX)
+project(TideVec VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -31,7 +31,12 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aar
     # No -mavx2 or -mfma here; ARM64 uses native NEON instructions automatically via -O3
 else()
     message(STATUS "Configuring for x86_64 architecture")
-    list(APPEND TIDEVEC_OPT_FLAGS -march=native)
+    # Release images must run on CPUs other than the build machine's:
+    # docker/*/Dockerfile pass -DTIDEVEC_MARCH=x86-64-v3 (AVX2 + FMA).
+    set(TIDEVEC_MARCH "native" CACHE STRING "x86_64 -march value (empty to omit)")
+    if(TIDEVEC_MARCH)
+        list(APPEND TIDEVEC_OPT_FLAGS -march=${TIDEVEC_MARCH})
+    endif()
 endif()
 
 # ---- Interface library (header-only core) -----------------------
@@ -54,11 +59,17 @@ add_executable(tidevec-server
 target_link_libraries(tidevec-server PRIVATE tidevec_headers Threads::Threads)
 target_compile_options(tidevec-server PRIVATE ${TIDEVEC_WARN_FLAGS} -O2)
 
+# Multi-Raft shard router (experimental; routes over several Raft groups)
+add_executable(tidevec-router src/cluster/router_main.cpp)
+target_link_libraries(tidevec-router PRIVATE tidevec_headers Threads::Threads)
+target_compile_options(tidevec-router PRIVATE ${TIDEVEC_WARN_FLAGS} -O2)
+
 if(TIDEVEC_TLS)
-    find_package(OpenSSL REQUIRED)
-    target_link_libraries(tidevec-server PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-    target_compile_definitions(tidevec-server PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT TIDEVEC_TLS)
-    message(STATUS "TLS support ENABLED (OpenSSL)")
+    # On tidevec_headers so every target sees the same httplib configuration.
+    find_package(OpenSSL 3.0 REQUIRED)
+    target_link_libraries(tidevec_headers INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(tidevec_headers INTERFACE CPPHTTPLIB_OPENSSL_SUPPORT TIDEVEC_TLS)
+    message(STATUS "TLS support ENABLED (OpenSSL ${OPENSSL_VERSION})")
 endif()
 
 # ---- CUDA (optional) --------------------------------------------
@@ -157,6 +168,27 @@ if(TIDEVEC_BUILD_TESTS)
     target_link_libraries(tidevec_api_tests PRIVATE tidevec_headers Threads::Threads)
     target_compile_options(tidevec_api_tests PRIVATE ${TIDEVEC_WARN_FLAGS} ${TIDEVEC_OPT_FLAGS})
 
+    # Auth, tenancy, backup/restore, OTLP and TLS tests
+    add_executable(tidevec_security_tests
+            tests/integration/test_security.cpp
+    )
+    target_link_libraries(tidevec_security_tests PRIVATE tidevec_headers Threads::Threads)
+    target_compile_options(tidevec_security_tests PRIVATE ${TIDEVEC_WARN_FLAGS} -O2)
+
+    # C++ SDK against a live tidevec-server process. The SDK's types share
+    # names with the server's, so this target must not see include/ core
+    # headers (httplib alone is used for a stub server).
+    add_executable(tidevec_cpp_sdk_tests
+            tests/integration/test_cpp_sdk.cpp
+    )
+    target_include_directories(tidevec_cpp_sdk_tests PRIVATE
+            ${CMAKE_SOURCE_DIR}/sdk/cpp/include ${CMAKE_SOURCE_DIR}/include/tidevec/api)
+    target_link_libraries(tidevec_cpp_sdk_tests PRIVATE Threads::Threads)
+    target_compile_options(tidevec_cpp_sdk_tests PRIVATE ${TIDEVEC_WARN_FLAGS} -O2)
+    target_compile_definitions(tidevec_cpp_sdk_tests PRIVATE
+            TIDEVEC_SERVER_BIN="$<TARGET_FILE:tidevec-server>")
+    add_dependencies(tidevec_cpp_sdk_tests tidevec-server)
+
     # GPU/TPU Accelerator tests
     add_executable(tidevec_accel_tests
             tests/unit/test_accelerator.cpp
@@ -195,6 +227,13 @@ if(TIDEVEC_BUILD_TESTS)
     else()
         message(STATUS "Skipping tidevec_eleven_nines_tests (source not found)")
     endif()
+
+    # Raft cluster tests (snapshots, membership, ReadIndex, pre-vote, faults)
+    add_executable(tidevec_cluster_tests
+            tests/cluster/test_raft_cluster.cpp
+    )
+    target_link_libraries(tidevec_cluster_tests PRIVATE tidevec_headers Threads::Threads)
+    target_compile_options(tidevec_cluster_tests PRIVATE ${TIDEVEC_WARN_FLAGS} ${TIDEVEC_OPT_FLAGS})
 
     # 1B-scale benchmark
     add_executable(tidevec_bench_billion

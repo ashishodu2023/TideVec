@@ -1,6 +1,6 @@
 // ================================================================
 // test_eleven_nines.cpp
-// Tests for 11-nines durability and availability components:
+// Tests for the durability and consensus components:
 //   - Reed-Solomon GF(256) arithmetic
 //   - RS encode/decode with arbitrary shard loss
 //   - Raft leader election and log replication
@@ -11,6 +11,7 @@
 
 #include <tidevec/erasure/reed_solomon.hpp>
 #include <tidevec/consensus/raft.hpp>
+#include <tidevec/consensus/raft_http.hpp>
 #include <tidevec/health/health_monitor.hpp>
 #include <tidevec/cluster/ultra_durable_collection.hpp>
 
@@ -25,6 +26,9 @@
 #include <filesystem>
 #include <numeric>
 #include <atomic>
+#include <algorithm>
+#include <map>
+#include <set>
 
 using namespace tidevec;
 using namespace tidevec::erasure;
@@ -37,10 +41,14 @@ static int tests_run=0, tests_passed=0;
 #define TEST(name) static void test_##name();\
     struct _r_##name{_r_##name(){run_test(#name,test_##name);}} _i_##name;\
     static void test_##name()
-#define ASSERT(c) do{if(!(c)){std::cerr<<"  FAIL: "#c" line "<<__LINE__<<"\n";return;}}while(0)
+static bool g_current_test_failed=false;
+#define ASSERT(c) do{if(!(c)){std::cerr<<"  FAIL: "#c" line "<<__LINE__<<"\n";g_current_test_failed=true;return;}}while(0)
 #define ASSERT_NEAR(a,b,e) ASSERT(std::abs((double)(a)-(double)(b))<(double)(e))
 static void run_test(const char*n,void(*f)()){
-    ++tests_run;std::cout<<"[TEST] "<<n<<" ... ";f();++tests_passed;std::cout<<"PASS\n";}
+    ++tests_run;std::cout<<"[TEST] "<<n<<" ... ";
+    g_current_test_failed=false;f();
+    if(g_current_test_failed){std::cout<<"FAILED\n";return;}
+    ++tests_passed;std::cout<<"PASS\n";}
 
 // =================================================================
 // SECTION 1: GF(256) Arithmetic
@@ -209,19 +217,19 @@ TEST(rs_storage_overhead) {
 // SECTION 4: Durability Math
 // =================================================================
 
-TEST(durability_rs104_11_nines) {
+TEST(durability_rs104_model) {
     ReedSolomon rs(10, 4);
     // Backblaze AFR: ~0.4% annual disk failure rate
     double p_fail = 0.004;
     double nines  = rs.durability_nines(p_fail);
     std::cout << "\n    RS(10,4) durability: " << std::fixed
               << std::setprecision(1) << nines << " nines at p_fail="
-              << p_fail << " ";
-    // Should be ~10.8 nines ≈ 11 nines
-    ASSERT(nines > 10.0);
+              << std::setprecision(3) << p_fail << " ";
+    // P(loss) ≈ C(14,5)·p^5 ≈ 2.0e-9/yr → 8.7 nines
+    ASSERT(nines > 8.6 && nines < 8.8);
 }
 
-TEST(durability_rs42_5_nines) {
+TEST(durability_rs42_model) {
     ReedSolomon rs(4, 2);
     double p_fail = 0.004;
     double nines  = rs.durability_nines(p_fail);
@@ -243,7 +251,7 @@ TEST(durability_replication_comparison) {
     // 3-way replication: P(loss) = P(all 3 fail) ≈ p^3 for independent failures
     // (simplified; real analysis accounts for rebuild time)
     double rep3_p_loss = p_fail * p_fail * p_fail;
-    double rep3_nines  = -std::log10(rep3_p_loss) + 2.0;
+    double rep3_nines  = ReedSolomon::nines_from_loss(rep3_p_loss);
 
     std::cout << "\n    3-way replication: " << std::fixed << std::setprecision(1)
               << rep3_nines << " nines\n"
@@ -251,7 +259,7 @@ TEST(durability_replication_comparison) {
               << "    RS advantage:      " << (rs_nines - rep3_nines) << " extra nines ";
 
     ASSERT(rs_nines > rep3_nines);  // RS is strictly more durable
-    ASSERT(rs_nines > 10.0);        // 11 nines threshold
+    ASSERT(rs_nines > 8.6);
 }
 
 // =================================================================
@@ -274,23 +282,27 @@ TEST(raft_leader_election) {
 }
 
 TEST(raft_log_replication) {
+    // Each of the 3 replicas applies every committed entry to its own
+    // state machine: 5 entries × 3 nodes = 15 applies.
     std::atomic<int> applied{0};
     RaftGroup cluster(3, [&](const LogEntry& e){
         if (!e.is_noop()) ++applied;
     });
     cluster.start();
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    ASSERT(cluster.wait_for_leader(5000));
 
-    // Submit 5 entries
+    std::optional<Index> last;
     for (int i = 0; i < 5; ++i) {
         std::vector<uint8_t> payload{'T','E','S','T'};
-        auto idx = cluster.submit("UPSERT", payload);
-        ASSERT(idx.has_value());
+        last = cluster.submit("UPSERT", payload);
+        ASSERT(last.has_value());
     }
 
-    // Wait for commit
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
-    ASSERT(applied.load() == 5);
+    ASSERT(cluster.wait_committed(*last, 2000));
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (applied.load() < 15 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    ASSERT(applied.load() == 15);
 
     cluster.stop();
 }
@@ -302,7 +314,7 @@ TEST(raft_majority_commit) {
         if (!e.is_noop()) ++applied;
     });
     cluster.start();
-    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    ASSERT(cluster.wait_for_leader(5000));
 
     std::vector<uint8_t> payload(8, 0xAB);
     auto idx = cluster.submit("UPSERT", payload);
@@ -316,17 +328,153 @@ TEST(raft_majority_commit) {
 }
 
 TEST(raft_term_monotonically_increases) {
-    // Raft safety property: verified mathematically and by protocol proof
-    // (Ongaro & Ousterhout, USENIX ATC 2014)
-    // In-cluster integration tests run in tidevec_integration_tests (separate binary)
-    ASSERT(true);
+    RaftNode::ApplyFn noop = [](const LogEntry&){};
+    RaftGroup cluster(5, noop);
+    cluster.start();
+    std::vector<Term> last(5, 0);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(400);
+    bool ok = true;
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (int i = 0; i < 5; ++i) {
+            Term t = cluster.node(i).current_term();
+            if (t < last[i]) ok = false;
+            last[i] = t;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    cluster.stop();
+    ASSERT(ok);
+    ASSERT(*std::max_element(last.begin(), last.end()) >= 1);
 }
 
 TEST(raft_no_split_brain) {
-    // Raft safety property: verified mathematically and by protocol proof
-    // (Ongaro & Ousterhout, USENIX ATC 2014)
-    // In-cluster integration tests run in tidevec_integration_tests (separate binary)
-    ASSERT(true);
+    // Sample the live cluster: no two nodes may be leader in the same term.
+    RaftNode::ApplyFn noop = [](const LogEntry&){};
+    RaftGroup cluster(5, noop);
+    cluster.start();
+    std::map<Term, std::set<int>> leaders_by_term;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (int i = 0; i < 5; ++i) {
+            const auto& n = cluster.node(i);
+            if (n.is_leader()) leaders_by_term[n.current_term()].insert(i);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    cluster.stop();
+    ASSERT(!leaders_by_term.empty());
+    for (const auto& [term, ids] : leaders_by_term)
+        ASSERT(ids.size() == 1);
+}
+
+// Builds n persisted nodes wired with LocalPeer.
+static std::vector<std::unique_ptr<RaftNode>>
+make_persisted_cluster(const fs::path& dir, int n, RaftNode::ApplyFn fn) {
+    std::vector<std::unique_ptr<RaftNode>> nodes;
+    for (int i = 0; i < n; ++i) {
+        RaftConfig cfg;
+        cfg.node_id = i;
+        cfg.n_nodes = n;
+        cfg.persist_dir = (dir / ("n" + std::to_string(i))).string();
+        nodes.push_back(std::make_unique<RaftNode>(cfg, fn));
+    }
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            if (i != j) nodes[i]->register_peer(j, nodes[j].get());
+    return nodes;
+}
+
+static RaftNode* wait_leader(std::vector<std::unique_ptr<RaftNode>>& nodes) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (auto& n : nodes) if (n->is_leader()) return n.get();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return nullptr;
+}
+
+TEST(raft_persistent_state_survives_restart) {
+    fs::path dir = fs::temp_directory_path() / "tidevec_raft_persist";
+    fs::remove_all(dir);
+    std::atomic<int> applied{0};
+    auto count = [&](const LogEntry&) { ++applied; };
+    Term term_before = 0;
+    {
+        auto nodes = make_persisted_cluster(dir, 3, count);
+        for (auto& n : nodes) n->start();
+        RaftNode* leader = wait_leader(nodes);
+        ASSERT(leader != nullptr);
+        std::optional<Index> last;
+        for (int i = 0; i < 5; ++i) last = leader->submit("UPSERT", {uint8_t(i)});
+        ASSERT(last && leader->wait_committed(*last, 2000));
+        term_before = leader->current_term();
+        for (auto& n : nodes) n->stop();
+    }
+    // All three replicas re-apply the 5 committed entries from disk once a
+    // new leader re-establishes the commit index.
+    applied = 0;
+    auto nodes = make_persisted_cluster(dir, 3, count);
+    for (auto& n : nodes) ASSERT(n->log_size() >= 7);   // sentinel + NOOP + 5
+    for (auto& n : nodes) n->start();
+    RaftNode* leader = wait_leader(nodes);
+    ASSERT(leader != nullptr);
+    ASSERT(leader->current_term() > term_before);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (applied.load() < 15 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    for (auto& n : nodes) n->stop();
+    ASSERT(applied.load() == 15);
+    fs::remove_all(dir);
+}
+
+TEST(raft_single_node_commits_and_discards_torn_tail) {
+    fs::path dir = fs::temp_directory_path() / "tidevec_raft_torn";
+    fs::remove_all(dir);
+    RaftConfig cfg;
+    cfg.node_id = 0;
+    cfg.n_nodes = 1;
+    cfg.persist_dir = dir.string();
+    {
+        RaftNode node(cfg, [](const LogEntry&) {});
+        node.start();
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!node.is_leader() && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        ASSERT(node.is_leader());
+        std::optional<Index> last;
+        for (int i = 0; i < 3; ++i) last = node.submit("UPSERT", {1, 2, 3});
+        ASSERT(last && node.wait_committed(*last, 1000));
+        node.stop();
+    }
+    { std::ofstream f(dir / "raft_log", std::ios::binary | std::ios::app); f << "garbage"; }
+    // Entries already applied are not replayed.
+    cfg.initial_applied = 5;
+    std::atomic<int> replayed{0};
+    RaftNode node(cfg, [&](const LogEntry&) { ++replayed; });
+    ASSERT(node.log_size() == 5);          // sentinel + NOOP + 3, tail dropped
+    ASSERT(node.last_applied() == 4);      // clamped to the last log index
+    node.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    node.stop();
+    ASSERT(replayed.load() == 0);
+    fs::remove_all(dir);
+}
+
+TEST(raft_http_codec_roundtrip) {
+    std::vector<uint8_t> bytes;
+    for (int i = 0; i < 300; ++i) bytes.push_back(static_cast<uint8_t>(i * 7));
+    for (std::size_t len : {0u, 1u, 2u, 3u, 4u, 299u, 300u}) {
+        std::vector<uint8_t> in(bytes.begin(), bytes.begin() + len);
+        ASSERT(base64_decode(base64_encode(in)) == in);
+    }
+    AppendEntriesArgs a{3, 1, 7, 2, {{3, 8, "CMD", {0, 255, 10}}}, 6};
+    auto b = append_args_from_json(to_json(a));
+    ASSERT(b.term == 3 && b.leader_id == 1 && b.prev_log_index == 7 &&
+           b.prev_log_term == 2 && b.leader_commit == 6);
+    ASSERT(b.entries.size() == 1 && b.entries[0].payload == a.entries[0].payload &&
+           b.entries[0].op == "CMD");
+    ASSERT(secret_equals("abc", "abc") && !secret_equals("abc", "abd") &&
+           !secret_equals("abc", "abcd"));
 }
 
 // =================================================================
@@ -348,7 +496,7 @@ TEST(health_monitor_startup) {
 
     auto rep = hm.durability_report();
     ASSERT(rep.n_nodes_healthy == 14);
-    ASSERT(rep.effective_nines > 10.0);
+    ASSERT(rep.effective_nines > 8.6);
     ASSERT(rep.status == "OK");
 }
 
@@ -366,8 +514,8 @@ TEST(health_monitor_failure_detection) {
     auto rep = hm.durability_report();
     ASSERT(rep.n_nodes_failed == 2);
     ASSERT(rep.status == "DEGRADED (repairing)");
-    // Still above 10 nines with 2/4 failures
-    ASSERT(rep.effective_nines > 8.0);
+    // Two lost shards leave room for only two more: P(≥3 of 12) ≈ 1.4e-5
+    ASSERT(rep.effective_nines > 4.5 && rep.effective_nines < 5.0);
 }
 
 TEST(health_monitor_recovery) {
@@ -414,18 +562,18 @@ TEST(health_monitor_prometheus_metrics) {
 // =================================================================
 
 TEST(ultra_durable_startup_and_durability) {
-    // Verify RS(k,m) durability thresholds for production configs
+    // Verify RS(k,m) durability thresholds for production configs.
+    // Adding data shards at fixed parity lowers durability: RS(14,4) ≈ 8.1.
     std::vector<std::tuple<int,int,double>> configs = {
-        {4, 2, 5.0}, {6, 3, 7.0}, {10, 4, 10.0}, {14, 4, 11.0},
+        {4, 2, 5.5}, {6, 3, 7.4}, {10, 4, 8.6}, {14, 4, 8.0},
     };
     for (auto& [k, m, min_nines] : configs) {
         ReedSolomon rs(k, m);
         double nines = rs.durability_nines(0.004);
         ASSERT(nines > min_nines);
     }
-    // RS(10,4) meets 11-nines threshold
     ReedSolomon rs(10, 4);
-    ASSERT(rs.durability_nines(0.004) > 10.5);
+    ASSERT(rs.durability_nines(0.004) > 8.6);
     ASSERT(rs.k() == 10); ASSERT(rs.m() == 4);
     ASSERT(rs.n() == 14);  // 14 total shards
 }
@@ -472,18 +620,43 @@ TEST(ultra_durable_wal_group_commit) {
     ASSERT(lat_batched_s < lat_single_s / 100);
 }
 
+TEST(ultra_durable_applies_each_write_once) {
+    std::string dir = "/tmp/tidevec_udc_" + std::to_string(now_ms());
+    {
+        UltraDurableCollection::Config cfg;
+        cfg.name = "udc"; cfg.dim = 4; cfg.n_shards = 2;
+        cfg.raft_nodes = 3; cfg.data_dir = dir;
+        UltraDurableCollection udc(cfg);
+
+        udc.upsert(CortexVector("old", {1.f, 0.f, 0.f, 0.f}));
+        udc.upsert(CortexVector("new", {0.f, 1.f, 0.f, 0.f}));
+        udc.upsert(CortexVector("x",   {0.f, 0.f, 1.f, 0.f}));
+        // Read-your-writes: upsert returns only after apply.
+        ASSERT(udc.total_vectors() == 3);
+        // One apply per write, not one per Raft node.
+        ASSERT(udc.underlying().total_writes() == 3);
+
+        udc.add_edge("new", "old", EdgeType::UPDATES);
+        QueryOptions opts; opts.top_k = 1; opts.temporal_blend = 0.0f;
+        auto res = udc.search({1.f, 0.f, 0.f, 0.f}, opts);
+        ASSERT(res.size() == 1 && res[0].id == "old");
+        ASSERT(res[0].superseded_by == std::vector<std::string>{"new"});
+    }
+    std::filesystem::remove_all(dir);
+}
+
 // =================================================================
 // MAIN
 // =================================================================
 int main() {
-    std::cout << "\n=== TideVec 11-Nines Durability & Availability Tests ===\n\n";
+    std::cout << "\n=== TideVec Durability & Consensus Tests ===\n\n";
 
     std::cout << "\n--- Results ---\n";
     std::cout << tests_passed << " / " << tests_run << " tests passed\n";
     if (tests_passed == tests_run) {
         std::cout << "ALL TESTS PASSED\n\n";
-        std::cout << "Durability: RS(10,4) = ~11 nines = 99.999999999%\n";
-        std::cout << "Availability: 5-node Raft = 9 nines = 99.9999999%\n\n";
+        std::cout << "Modelled durability: RS(10,4) = 8.7 nines at 0.4% annual disk failure\n"
+                  << "(independent disks, no repair; the server keeps all shards on one host)\n\n";
         return 0;
     }
     std::cout << (tests_run - tests_passed) << " TESTS FAILED\n\n";

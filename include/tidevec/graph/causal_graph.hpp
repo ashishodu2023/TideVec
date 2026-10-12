@@ -93,6 +93,40 @@ public:
         return result;
     }
 
+    std::vector<GraphEdge> get_in_edges(
+            const std::string& id,
+            std::optional<EdgeType> type_filter = std::nullopt) const {
+        std::shared_lock lock(mutex_);
+        auto it = in_edges_.find(id);
+        if (it == in_edges_.end()) return {};
+        if (!type_filter) return it->second;
+        std::vector<GraphEdge> result;
+        for (const auto& e : it->second)
+            if (e.type == *type_filter) result.push_back(e);
+        return result;
+    }
+
+    bool has_edge(const std::string& src, const std::string& tgt,
+                  EdgeType type) const {
+        std::shared_lock lock(mutex_);
+        auto it = out_edges_.find(src);
+        if (it == out_edges_.end()) return false;
+        for (const auto& e : it->second)
+            if (e.tgt_id == tgt && e.type == type) return true;
+        return false;
+    }
+
+    // Newer versions of `id`: SUPERSEDED_BY out-edges plus UPDATES in-edges.
+    std::vector<std::string> find_superseding(const std::string& id) const {
+        std::vector<std::string> out;
+        std::unordered_set<std::string> seen;
+        for (const auto& e : get_out_edges(id, EdgeType::SUPERSEDED_BY))
+            if (seen.insert(e.tgt_id).second) out.push_back(e.tgt_id);
+        for (const auto& e : get_in_edges(id, EdgeType::UPDATES))
+            if (seen.insert(e.src_id).second) out.push_back(e.src_id);
+        return out;
+    }
+
     // BFS up to `hops` depth — returns all reachable node IDs
     std::vector<std::string> get_neighbours(
             const std::string& start,
@@ -123,9 +157,15 @@ public:
         return std::vector<std::string>(visited.begin(), visited.end());
     }
 
-    // Find all vectors that CONTRADICT the given id
+    // Find all vectors that CONTRADICT the given id (in either direction)
     std::vector<std::string> find_contradictions(const std::string& id) const {
-        return get_neighbours(id, 1, EdgeType::CONTRADICTS);
+        std::vector<std::string> out;
+        std::unordered_set<std::string> seen;
+        for (const auto& e : get_out_edges(id, EdgeType::CONTRADICTS))
+            if (seen.insert(e.tgt_id).second) out.push_back(e.tgt_id);
+        for (const auto& e : get_in_edges(id, EdgeType::CONTRADICTS))
+            if (seen.insert(e.src_id).second) out.push_back(e.src_id);
+        return out;
     }
 
     // Find all vectors sharing the same entity (ENTITY_OF links)

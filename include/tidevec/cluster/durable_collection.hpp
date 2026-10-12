@@ -51,6 +51,7 @@ public:
         bool use_segment_store       = false;  // disk-backed vector storage
         std::size_t segment_buf_size = 100'000;
         AgentContext agent;
+        SupersessionConfig supersession;   // cross-shard; shards keep it off
     };
 
     explicit DurableCollection(Config cfg) : cfg_(std::move(cfg)) {
@@ -94,6 +95,49 @@ public:
         return cfg_.temporal;
     }
 
+    // ------ Index compaction ---------------------------------------
+
+    using CompactionStatus = tidevec::CompactionStatus;
+
+    // Rebuild every shard's indexes (primary and replicas) in the
+    // background; reads and writes continue meanwhile. With wait=true the
+    // call returns once every rebuild has been swapped in. Compaction only
+    // drops tombstones, so the logical contents never change.
+    CompactionStatus compact(bool wait = false) const {
+        std::size_t started = 0;
+        for (const auto& rs : shard_replicas_) {
+            bool any = false;
+            rs->for_each_collection([&](Collection& c) { any |= c.compact_async(); });
+            started += any;
+        }
+        if (wait)
+            for (const auto& rs : shard_replicas_)
+                rs->for_each_collection([](Collection& c) { c.wait_for_compaction(); });
+        CompactionStatus s = compaction_status();
+        s.started = started;
+        return s;
+    }
+
+    CompactionStatus compaction_status() const {
+        CompactionStatus s;
+        for (const auto& rs : shard_replicas_) {
+            bool running = false;
+            rs->for_each_collection([&](Collection& c) {
+                running |= c.compaction_stats().running;
+            });
+            s.running += running;
+            const Collection& p = *rs->primary();
+            const CompactionStats cs = p.compaction_stats();
+            s.runs           += cs.runs;
+            s.tombstones     += p.tombstones();
+            s.index_bytes    += p.index_memory_bytes();
+            s.last_reclaimed += cs.last_reclaimed;
+            s.last_replayed  += cs.last_replayed;
+            s.last_ms = std::max(s.last_ms, cs.last_ms);
+        }
+        return s;
+    }
+
     // ------ Crash recovery ---------------------------------------
     // Call once after construction, before accepting requests.
     // Replays all shard WALs to restore in-memory state.
@@ -114,9 +158,25 @@ public:
         CortexVector v = vec;
         if (cfg_.agent.enabled && cfg_.agent.memory_ttl_seconds > 0)
             v.set_ttl_seconds(cfg_.agent.memory_ttl_seconds);
+
+        std::vector<SupersessionLink> links;
+        if (cfg_.supersession.enabled)
+            links = plan_supersession(v, _nearest_all_shards(v.embedding), cfg_.supersession);
+
         _shard_for(v.id).upsert(v);
         if (segment_store_) segment_store_->put(v);
         ++total_writes_;
+
+        for (const auto& l : links) {
+            if (_shard_for(l.older).primary()->graph().has_edge(
+                    l.older, l.newer, EdgeType::SUPERSEDED_BY))
+                continue;
+            add_edge(l.newer, l.older, EdgeType::UPDATES);
+        }
+    }
+
+    bool contains(const std::string& id) {
+        return _shard_for(id).primary()->contains(id);
     }
 
     bool remove(const std::string& id) {
@@ -124,9 +184,70 @@ public:
         return _shard_for(id).remove(id);
     }
 
+    // UPDATES edges are mirrored as SUPERSEDED_BY, and CONTRADICTS edges
+    // as CONTRADICTS, on the target's shard so per-shard search can flag
+    // the target without a cross-shard lookup.
     void add_edge(const std::string& src, const std::string& tgt,
                   EdgeType type, float weight = 1.0f) {
         _shard_for(src).add_edge(src, tgt, type, weight);
+        if (type == EdgeType::UPDATES)
+            _shard_for(tgt).add_edge(tgt, src, EdgeType::SUPERSEDED_BY, weight);
+        else if (type == EdgeType::CONTRADICTS && &_shard_for(tgt) != &_shard_for(src))
+            _shard_for(tgt).add_edge(tgt, src, EdgeType::CONTRADICTS, weight);
+    }
+
+    std::vector<std::string> superseded_by(const std::string& id) const {
+        if (shard_replicas_.empty()) return {};
+        std::size_t idx = hash_to_shard(id, shard_replicas_.size());
+        return shard_replicas_[idx]->primary()->superseded_by(id);
+    }
+
+    const SupersessionConfig& supersession_config() const { return cfg_.supersession; }
+
+    // ------ Point reads / iteration (primary of each shard) ------
+
+    std::optional<CortexVector> get(const std::string& id, bool with_vector = true) const {
+        if (shard_replicas_.empty()) return std::nullopt;
+        std::size_t idx = hash_to_shard(id, shard_replicas_.size());
+        return shard_replicas_[idx]->primary()->get(id, with_vector);
+    }
+
+    std::optional<Timestamp> created_at_of(const std::string& id) const {
+        if (shard_replicas_.empty()) return std::nullopt;
+        std::size_t idx = hash_to_shard(id, shard_replicas_.size());
+        return shard_replicas_[idx]->primary()->created_at_of(id);
+    }
+
+    // Up to `limit` vectors with id > `after` across all shards, in id
+    // order, matching opts' filter / as_of.
+    std::vector<CortexVector> scroll(const std::string& after, std::size_t limit,
+                                     const QueryOptions& opts,
+                                     bool with_vector = false) const {
+        std::vector<CortexVector> all;
+        for (const auto& rs : shard_replicas_) {
+            auto part = rs->primary()->scroll(after, limit, opts, with_vector);
+            all.insert(all.end(), std::make_move_iterator(part.begin()),
+                       std::make_move_iterator(part.end()));
+        }
+        std::sort(all.begin(), all.end(),
+                  [](const CortexVector& a, const CortexVector& b) { return a.id < b.id; });
+        if (all.size() > limit) all.resize(limit);
+        return all;
+    }
+
+    // BM25 keyword search, merged across shards by score.
+    std::vector<SearchResult> text_search(const std::string& text,
+                                          const QueryOptions& opts) const {
+        std::vector<SearchResult> all;
+        for (const auto& rs : shard_replicas_) {
+            auto r = rs->primary()->text_search(text, opts);
+            all.insert(all.end(), r.begin(), r.end());
+        }
+        std::stable_sort(all.begin(), all.end(),
+            [](const SearchResult& a, const SearchResult& b) { return a.score > b.score; });
+        if (all.size() > static_cast<std::size_t>(std::max(0, opts.top_k)))
+            all.resize(static_cast<std::size_t>(std::max(0, opts.top_k)));
+        return all;
     }
 
     // ------ Read API (scatter-gather across shards) -------------
@@ -225,6 +346,17 @@ public:
     }
 
 private:
+    std::vector<SearchResult> _nearest_all_shards(const std::vector<float>& query) {
+        auto q = supersession_query_opts(cfg_.supersession);
+        std::vector<SearchResult> all;
+        for (auto& rs : shard_replicas_) {
+            if (rs->primary_size() == 0) continue;
+            auto r = rs->primary()->search(query, q);
+            all.insert(all.end(), r.begin(), r.end());
+        }
+        return all;
+    }
+
     void _purge_expired_on_shards() {
         for (auto& rs : shard_replicas_)
             if (auto* col = rs->primary())

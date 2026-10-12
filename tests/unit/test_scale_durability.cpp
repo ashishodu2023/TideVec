@@ -6,6 +6,7 @@
 #include <tidevec/cluster/shard_router.hpp>
 #include <tidevec/cluster/replica_set.hpp>
 #include <tidevec/cluster/durable_collection.hpp>
+#include <tidevec/api/json_serializers.hpp>
 
 #include <iostream>
 #include <cassert>
@@ -16,12 +17,17 @@
 #include <thread>
 #include <chrono>
 #include <random>
+#include <algorithm>
+#include <cstdio>
+#include <cstdlib>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 using namespace tidevec;
 
 // ---- test harness -----------------------------------------------
 static int tests_run = 0, tests_passed = 0;
+static bool g_current_test_failed = false;
 
 #define TEST(name) \
     void test_##name(); \
@@ -29,7 +35,11 @@ static int tests_run = 0, tests_passed = 0;
     void test_##name()
 
 #define ASSERT(cond) do { \
-    if (!(cond)) { std::cerr << "  FAIL: " #cond " line " << __LINE__ << "\n"; return; } \
+    if (!(cond)) { \
+        std::cerr << "  FAIL: " #cond " line " << __LINE__ << "\n"; \
+        g_current_test_failed = true; \
+        return; \
+    } \
 } while(0)
 
 #define ASSERT_NEAR(a,b,eps) ASSERT(std::abs((float)(a)-(float)(b)) < (float)(eps))
@@ -37,7 +47,12 @@ static int tests_run = 0, tests_passed = 0;
 static void run_test(const char* name, void(*fn)()) {
     ++tests_run;
     std::cout << "[TEST] " << name << " ... ";
+    g_current_test_failed = false;
     fn();
+    if (g_current_test_failed) {
+        std::cout << "FAILED\n";
+        return;
+    }
     ++tests_passed;
     std::cout << "PASS\n";
 }
@@ -472,6 +487,224 @@ TEST(durable_collection_concurrent_writes) {
     ASSERT(dc.total_vectors() == 100);
 
     fs::remove_all(data_dir);
+}
+
+TEST(durable_supersession_across_shards) {
+    std::string data_dir = "/tmp/tidevec_sup_" + std::to_string(now_ms());
+
+    DurableCollection::Config cfg;
+    cfg.name = "sup"; cfg.dim = 4;
+    cfg.n_shards = 4; cfg.n_replicas = 1; cfg.write_quorum = 1;
+    cfg.data_dir = data_dir;
+    cfg.supersession.enabled = true;
+    cfg.supersession.similarity_threshold = 0.9f;
+    DurableCollection dc(cfg);
+
+    // Pick ids that hash to different shards so the link must cross shards.
+    std::string old_id = "policy_old", new_id;
+    for (int i = 0; new_id.empty(); ++i) {
+        std::string cand = "policy_new_" + std::to_string(i);
+        if (hash_to_shard(cand, 4) != hash_to_shard(old_id, 4)) new_id = cand;
+    }
+
+    CortexVector old_v(old_id, {1.f, 0.f, 0.f, 0.f});
+    old_v.created_at = now_ms() - 20LL * 86'400'000;
+    dc.upsert(old_v);
+    dc.upsert(CortexVector("unrelated", {0.f, 1.f, 0.f, 0.f}));
+    dc.upsert(CortexVector(new_id, {0.98f, 0.1f, 0.f, 0.f}));
+
+    ASSERT(dc.superseded_by(old_id) == std::vector<std::string>{new_id});
+    ASSERT(dc.superseded_by(new_id).empty());
+
+    QueryOptions opts; opts.top_k = 3; opts.temporal_blend = 0.0f;
+    opts.superseded_penalty = 0.5f;
+    auto res = dc.search({1.f, 0.f, 0.f, 0.f}, opts);
+    ASSERT(!res.empty());
+    ASSERT(res[0].id == new_id);
+    bool flagged = false;
+    for (const auto& r : res)
+        if (r.id == old_id) flagged = r.staleness_warning && !r.superseded_by.empty();
+    ASSERT(flagged);
+
+    fs::remove_all(data_dir);
+}
+
+TEST(durable_edges_survive_recovery) {
+    std::string data_dir = "/tmp/tidevec_edge_rec_" + std::to_string(now_ms());
+
+    DurableCollection::Config cfg;
+    cfg.name = "edges"; cfg.dim = 4;
+    cfg.n_shards = 2; cfg.n_replicas = 1; cfg.write_quorum = 1;
+    cfg.data_dir = data_dir;
+
+    {
+        DurableCollection dc(cfg);
+        dc.upsert(CortexVector("a", {1.f, 0.f, 0.f, 0.f}));
+        dc.upsert(CortexVector("b", {0.f, 1.f, 0.f, 0.f}));
+        dc.upsert(CortexVector("c", {0.f, 0.f, 1.f, 0.f}));
+        dc.add_edge("a", "b", EdgeType::CONTRADICTS);
+        dc.add_edge("c", "a", EdgeType::UPDATES);
+    }
+
+    DurableCollection restored(cfg);
+    restored.recover();
+    ASSERT(restored.total_vectors() == 3);
+
+    QueryOptions opts; opts.top_k = 1; opts.temporal_blend = 0.0f;
+    opts.mode = QueryMode::CONTRADICTION_CHECK;
+    auto res = restored.search({1.f, 0.f, 0.f, 0.f}, opts);
+    ASSERT(res.size() == 1 && res[0].id == "a");
+    ASSERT(res[0].contradicted_by == std::vector<std::string>{"b"});
+    ASSERT(res[0].superseded_by == std::vector<std::string>{"c"});
+
+    fs::remove_all(data_dir);
+}
+
+// =================================================================
+// Filtered search at scale: recall@10 against a brute-force oracle and
+// per-query latency for each filter shape. Defaults keep CI fast; set
+// TIDEVEC_FILTER_BENCH_N (e.g. 100000 or 1000000) and optionally
+// TIDEVEC_FILTER_BENCH_DIM / _QUERIES for a real measurement.
+// Vectors are spread over shards built in parallel and searched with
+// a fan-out + merge, like DurableCollection does.
+// =================================================================
+static long env_long(const char* name, long def) {
+    const char* s = std::getenv(name);
+    return s && *s ? std::strtol(s, nullptr, 10) : def;
+}
+
+TEST(filtered_recall_at_scale) {
+    const long N  = env_long("TIDEVEC_FILTER_BENCH_N", 10000);
+    const int  D  = static_cast<int>(env_long("TIDEVEC_FILTER_BENCH_DIM", 64));
+    const int  NQ = static_cast<int>(env_long("TIDEVEC_FILTER_BENCH_QUERIES", 50));
+    const int  K  = 10;
+    const int  n_shards = static_cast<int>(std::clamp<long>(
+        N / 100000, 1, std::max(1u, std::thread::hardware_concurrency())));
+    const Timestamp t0 = 1'700'000'000'000LL;
+
+    // Clustered data (embeddings have far lower intrinsic dimension than
+    // uniform noise); payload attributes are independent of the vector.
+    std::mt19937 rng(1234);
+    std::normal_distribution<float> gauss(0.0f, 1.0f);
+    const int n_centers = 256;
+    std::vector<std::vector<float>> centers(n_centers, std::vector<float>(D));
+    for (auto& c : centers) for (auto& x : c) x = gauss(rng);
+    auto sample = [&](std::mt19937& r) {
+        std::vector<float> v = centers[r() % n_centers];
+        for (auto& x : v) x += 0.35f * gauss(r);
+        return v;
+    };
+
+    std::vector<CortexVector> vecs;
+    vecs.reserve(static_cast<std::size_t>(N));
+    for (long i = 0; i < N; ++i) {
+        std::unordered_map<std::string, std::string> p{
+            {"bucket", std::to_string(i % 100)},             // 1% per value
+            {"tenant", "t" + std::to_string(i % 10)},        // 10%
+            {"cat",    "c" + std::to_string((i / 10) % 10)}, // 10%, independent of tenant
+            {"half",   i % 2 ? "a" : "b"},                   // 50%
+            {"score",  std::to_string((i * 7919) % 1000)}};  // numeric 0..999
+        CortexVector v("v" + std::to_string(i), sample(rng), std::move(p));
+        v.created_at = v.valid_from = t0 + i * 1000;
+        vecs.push_back(std::move(v));
+    }
+
+    TVIndexConfig cfg;
+    cfg.temporal.temporal_blend = 0.0f;
+    std::vector<std::unique_ptr<TVIndex>> shards;
+    for (int s = 0; s < n_shards; ++s) shards.push_back(std::make_unique<TVIndex>(cfg));
+    auto build_start = std::chrono::steady_clock::now();
+    {
+        // Shard by id hash (as the router does) so shard membership is
+        // independent of the payload attributes.
+        std::vector<int> shard_of(static_cast<std::size_t>(N));
+        for (long i = 0; i < N; ++i)
+            shard_of[i] = static_cast<int>(std::hash<std::string>{}(vecs[i].id) % n_shards);
+        std::vector<std::thread> ts;
+        for (int s = 0; s < n_shards; ++s)
+            ts.emplace_back([&, s] {
+                for (long i = 0; i < N; ++i)
+                    if (shard_of[i] == s) shards[s]->insert(vecs[i]);
+            });
+        for (auto& t : ts) t.join();
+    }
+    double build_s = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - build_start).count();
+    std::cout << "\n  N=" << N << " dim=" << D << " shards=" << n_shards
+              << " queries=" << NQ << " build=" << build_s << "s\n";
+
+    std::vector<std::vector<float>> queries;
+    std::mt19937 qrng(77);
+    for (int q = 0; q < NQ; ++q) queries.push_back(sample(qrng));
+
+    struct Case { const char* name; json filter; double min_recall; };
+    const Timestamp t_1pct = t0 + (N / 100) * 1000;
+    std::vector<Case> cases = {
+        {"none",                    nullptr,                                         0.95},
+        {"keyword 1%",              {{"bucket", "42"}},                               0.95},
+        {"numeric range 1%",        {{"score", {{"$gte", 500}, {"$lt", 510}}}},       0.95},
+        {"AND tenant&cat 1%",       {{"tenant", "t3"}, {"cat", "c7"}},                0.95},
+        {"created_at range 1%",     {{"created_at", {{"$lt", t_1pct}}}},              0.95},
+        {"OR bucket 2%",            {{"$or", {{{"bucket", "1"}}, {{"bucket", "2"}}}}}, 0.95},
+        {"IN bucket 3%",            {{"bucket", {{"$in", {"5", "6", "7"}}}}},         0.95},
+        {"NOT 1%",                  {{"$not", {{"bucket", {{"$gte", 1}}}}}},          0.95},
+        {"keyword 10%",             {{"tenant", "t4"}},                               0.95},
+        {"keyword 50%",             {{"half", "a"}},                                  0.95},
+        {"ne 99%",                  {{"bucket", {{"$ne", "0"}}}},                     0.95},
+    };
+
+    bool ok = true;
+    for (const auto& c : cases) {
+        QueryOptions opts; opts.top_k = K;
+        opts.filter_expr = filter_from_json(c.filter);
+        const FilterExpr* f = opts.filter_expr.get();
+
+        double hit = 0, total = 0;
+        std::vector<double> lat;
+        for (const auto& q : queries) {
+            std::vector<std::pair<float, std::size_t>> s;
+            for (std::size_t i = 0; i < vecs.size(); ++i) {
+                if (f && !f->matches(vecs[i])) continue;
+                s.emplace_back(compute_similarity(q, vecs[i].embedding, Metric::COSINE), i);
+            }
+            std::size_t kk = std::min<std::size_t>(K, s.size());
+            std::partial_sort(s.begin(), s.begin() + kk, s.end(),
+                              [](auto& a, auto& b) { return a.first > b.first; });
+            std::unordered_set<std::string> truth;
+            for (std::size_t i = 0; i < kk; ++i) truth.insert(vecs[s[i].second].id);
+
+            auto qs = std::chrono::steady_clock::now();
+            std::vector<SearchResult> merged;
+            for (auto& sh : shards) {
+                auto r = sh->search(q, opts);
+                merged.insert(merged.end(), r.begin(), r.end());
+            }
+            std::sort(merged.begin(), merged.end(),
+                      [](auto& a, auto& b) { return a.score > b.score; });
+            if (merged.size() > static_cast<std::size_t>(K)) merged.resize(K);
+            lat.push_back(std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - qs).count());
+
+            for (const auto& r : merged) {
+                if (f && !f->matches(r.id, r.payload, r.created_at)) ok = false;
+                hit += truth.count(r.id);
+            }
+            total += static_cast<double>(truth.size());
+        }
+        std::sort(lat.begin(), lat.end());
+        double recall = total ? hit / total : 1.0;
+        double mean = 0;
+        for (double l : lat) mean += l;
+        mean /= static_cast<double>(lat.size());
+        char line[256];
+        std::snprintf(line, sizeof line,
+            "  %-22s plan=%-11s recall@10=%.3f  mean=%.2fms p50=%.2fms p95=%.2fms\n",
+            c.name, shards[0]->explain(opts).name().c_str(), recall, mean,
+            lat[lat.size() / 2], lat[std::min(lat.size() - 1, lat.size() * 95 / 100)]);
+        std::cout << line;
+        if (recall < c.min_recall) ok = false;
+    }
+    ASSERT(ok);
 }
 
 // =================================================================

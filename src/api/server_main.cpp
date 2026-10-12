@@ -9,6 +9,19 @@
 //                     [--ultra-durable] [--no-segment-store]
 //                     [--tls-cert cert.pem] [--tls-key key.pem]
 //                     [--rate-limit 100] [--quiet]
+//                     [--backup [--backup-interval-hours 6]]
+//                     [--reembed-allow host1,host2] [--reembed-allow-private]
+//
+// EXPERIMENTAL cluster mode (Raft over HTTP):
+//   ./tidevec-server --port 7001 --data-dir ./n0 --node-id 0
+//       --raft-peers 0=http://h0:7001,1=http://h1:7001,2=http://h2:7001
+//       --cluster-secret s3cret        (or TIDEVEC_CLUSTER_SECRET)
+//       [--raft-snapshot-threshold 4096] [--raft-election-timeout-ms 400]
+//       [--raft-heartbeat-ms 100] [--raft-verbose]
+//   Adding a node: start it with --raft-join (its own entry in
+//   --raft-peers is enough), then POST /v1/admin/cluster/add_node
+//   {"id":3,"url":"http://h3:7001"} to the leader.
+//   --enable-fault-injection exposes POST /v1/admin/fault (tests only).
 // ================================================================
 
 #include <tidevec/api/rest_server.hpp>
@@ -39,8 +52,27 @@ static std::vector<std::string> split_csv(const std::string& s) {
     return out;
 }
 
+// "0=http://a:6399,1=http://b:6399,2=http://c:6399" -> URLs indexed by node id.
+// Ids may have gaps (e.g. after node 1 was removed and node 3 added).
+static std::vector<std::string> parse_peers(const std::string& s) {
+    std::vector<std::string> urls;
+    for (const auto& part : split_csv(s)) {
+        auto eq = part.find('=');
+        if (eq == std::string::npos)
+            throw std::runtime_error("--raft-peers entries must look like id=url: " + part);
+        int id = std::stoi(part.substr(0, eq));
+        if (id < 0) throw std::runtime_error("--raft-peers: negative node id");
+        if (static_cast<std::size_t>(id) >= urls.size()) urls.resize(id + 1);
+        urls[id] = part.substr(eq + 1);
+    }
+    return urls;
+}
+
 int main(int argc, char* argv[]) {
     tidevec::RestServer::Config cfg;
+
+    if (const char* s = std::getenv("TIDEVEC_CLUSTER_SECRET"); s && s[0])
+        cfg.cluster_secret = s;
 
     // Auth on by default: generate key from env or random if not provided
     const char* env_key = std::getenv("TIDEVEC_API_KEY");
@@ -75,10 +107,16 @@ int main(int argc, char* argv[]) {
             else if (arg == "--tls-key")           cfg.tls_key  = next();
             else if (arg == "--rate-limit")        cfg.rate_limit_rps = parse_int(arg, next());
             else if (arg == "--backup-dir")        cfg.backup_dir = next();
+            else if (arg == "--backup-interval-hours") {
+                cfg.backup_interval_hours = parse_int(arg, next());
+                if (cfg.backup_interval_hours < 1)
+                    throw std::runtime_error("--backup-interval-hours must be >= 1");
+            }
             else if (arg == "--backup-s3")         cfg.backup_s3_uri = next();
             else if (arg == "--backup-gcs")        cfg.backup_gcs_uri = next();
             else if (arg == "--otel-endpoint")     cfg.otel_endpoint = next();
             else if (arg == "--reembed-allow")     cfg.reembed_allowed_hosts = split_csv(next());
+            else if (arg == "--reembed-allow-private") cfg.reembed_allow_private = true;
             else if (arg == "--require-auth")      cfg.require_auth = true;
             else if (arg == "--no-require-auth")   cfg.require_auth = false;
             else if (arg == "--ultra-durable")     cfg.ultra_durable = true;
@@ -89,6 +127,17 @@ int main(int argc, char* argv[]) {
             else if (arg == "--otel")              cfg.otel_enabled = true;
             else if (arg == "--multi-tenant")      cfg.multi_tenant = true;
             else if (arg == "--quiet")             cfg.log_requests = false;
+            else if (arg == "--node-id")           cfg.raft_node_id = parse_int(arg, next());
+            else if (arg == "--raft-peers")        cfg.raft_peers = parse_peers(next());
+            else if (arg == "--cluster-secret")    cfg.cluster_secret = next();
+            else if (arg == "--raft-verbose")      cfg.raft_verbose = true;
+            else if (arg == "--raft-join")         cfg.raft_join = true;
+            else if (arg == "--raft-snapshot-threshold")
+                cfg.raft_snapshot_threshold = static_cast<uint64_t>(parse_int(arg, next()));
+            else if (arg == "--raft-election-timeout-ms")
+                cfg.raft_election_timeout_ms = parse_int(arg, next());
+            else if (arg == "--raft-heartbeat-ms") cfg.raft_heartbeat_ms = parse_int(arg, next());
+            else if (arg == "--enable-fault-injection") cfg.enable_fault_injection = true;
             else {
                 std::cerr << "Unknown argument: " << arg << "\n";
                 return 1;
@@ -97,6 +146,19 @@ int main(int argc, char* argv[]) {
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
+    }
+
+    if (cfg.raft_node_id >= 0) {
+        if (cfg.raft_peers.size() < 1 ||
+            cfg.raft_node_id >= static_cast<int>(cfg.raft_peers.size()) ||
+            cfg.raft_peers[cfg.raft_node_id].empty()) {
+            std::cerr << "Error: --node-id requires --raft-peers listing every node "
+                         "(including this one)\n";
+            return 1;
+        }
+        if (cfg.cluster_secret.empty())
+            std::cerr << "Warning: no --cluster-secret / TIDEVEC_CLUSTER_SECRET; "
+                         "Raft RPC endpoints accept any caller.\n";
     }
 
     // Warn if auth required but no key configured
@@ -108,8 +170,15 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    tidevec::RestServer server(cfg);
-    g_server.store(&server);
-    server.listen();
+    try {
+        tidevec::RestServer server(cfg);
+        g_server.store(&server);
+        server.listen();
+        g_server.store(nullptr);
+    } catch (const std::exception& e) {
+        g_server.store(nullptr);
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
     return 0;
 }

@@ -4,7 +4,7 @@
 # Three install methods:
 #   1. CMake FetchContent (easiest — no install needed)
 #   2. vcpkg:  vcpkg install tidevec
-#   3. Conan:  conan install tidevec/0.1.0
+#   3. Conan:  conan install tidevec/0.3.0
 #   4. Manual: cmake --install build/
 #
 # Usage in your CMakeLists.txt (FetchContent):
@@ -12,7 +12,7 @@
 #   include(FetchContent)
 #   FetchContent_Declare(tidevec
 #     GIT_REPOSITORY https://github.com/ashishodu2023/TideVec.git
-#     GIT_TAG        v0.1.0
+#     GIT_TAG        v0.3.0
 #     SOURCE_SUBDIR  sdk/cpp
 #   )
 #   FetchContent_MakeAvailable(tidevec)
@@ -31,7 +31,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(tidevec-sdk
-    VERSION      0.1.0
+    VERSION      0.3.0
     DESCRIPTION  "TideVec C++ SDK — temporally-aware causal vector database"
     HOMEPAGE_URL "https://tidevec.com"
     LANGUAGES    CXX
@@ -53,7 +53,7 @@ add_library(tidevec INTERFACE)
 add_library(tidevec::tidevec ALIAS tidevec)
 
 target_include_directories(tidevec INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/../../include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
@@ -91,7 +91,7 @@ if(TIDEVEC_SDK_INSTALL)
 
     # Install headers
     install(
-        DIRECTORY   ${CMAKE_SOURCE_DIR}/../../include/tidevec
+        DIRECTORY   ${CMAKE_CURRENT_SOURCE_DIR}/include/tidevec
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
 

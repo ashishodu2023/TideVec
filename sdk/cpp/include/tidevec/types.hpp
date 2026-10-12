@@ -50,9 +50,9 @@ struct CausalEdge {
 struct Vector {
     VectorId                 id;
     Embedding                embedding;
-    Payload                  payload;
-    std::vector<CausalEdge>  edges;
-    std::optional<int64_t>   timestamp_ms;  // defaults to now()
+    Payload                  payload{};
+    std::vector<CausalEdge>  edges{};
+    std::optional<int64_t>   timestamp_ms{};  // sent as created_at; defaults to now()
 };
 
 // ── Search options ───────────────────────────────────────────────
@@ -72,13 +72,16 @@ enum class Device : uint8_t {
 
 struct SearchOptions {
     int         top_k            = 10;
-    float       temporal_blend   = 0.3f;   // 0=pure semantic, 1=pure recency
+    // 0 = pure semantic, 1 = pure recency. Unset = the collection's default.
+    std::optional<float> temporal_blend{};
     QueryMode   mode             = QueryMode::DEFAULT;
     Device      device           = Device::AUTO;
     int         causal_hops      = 1;
     bool        include_trace    = false;
     bool        staleness_warnings = true;
     float       staleness_threshold = 0.2f;
+    // Score multiplier penalty for results superseded by a newer version.
+    std::optional<float> superseded_penalty{};
 };
 
 // ── Search result ────────────────────────────────────────────────
@@ -92,14 +95,17 @@ struct SearchHit {
     std::string staleness_reason;
     std::vector<VectorId> causal_neighbors;
     std::vector<VectorId> contradicted_by;
+    std::vector<VectorId> superseded_by;
+    int64_t     created_at = 0;
 };
 
 struct RetrievalTrace {
-    std::string algorithm;       // "TVIndex" | "CAGRA" | "XLA_MATMUL" | "IVF"
-    double      latency_ms;
-    float       recall_estimate;
+    std::string algorithm;       // server "strategy"
+    double      latency_ms      = 0.0;
+    float       recall_estimate = 0.0f;
     std::string device_used;
-    int         vectors_scanned;
+    int         vectors_scanned = 0;   // server "distance_computations"
+    std::string query_id;
 };
 
 struct SearchResponse {
@@ -107,28 +113,41 @@ struct SearchResponse {
     RetrievalTrace         trace;
 };
 
+// ── Supersession (newer versions of a document mark older ones) ─
+struct SupersessionConfig {
+    bool        enabled              = true;
+    float       similarity_threshold = 0.92f;
+    std::string match_field;      // payload key identifying the same document
+    int         candidates           = 5;
+};
+
 // ── Collection config ────────────────────────────────────────────
 struct CollectionConfig {
     std::string name;
     int         dim              = 768;
     int64_t     half_life_ms     = 2592000000LL;  // 30 days default
-    float       temporal_blend   = 0.3f;
+    std::optional<float> temporal_blend{};        // unset = server default
     int         n_shards         = 4;
     int         n_replicas       = 1;
     std::string index_type       = "tvindex";      // tvindex | hnsw | flat | ivf
     float       staleness_threshold = 0.2f;
+    std::string metric           = "cosine";
+    std::optional<SupersessionConfig> supersession{};  // unset = disabled
 };
 
 // ── Collection stats ─────────────────────────────────────────────
 struct CollectionStats {
     std::string name;
-    int64_t     vector_count;
-    int64_t     edge_count;
-    int64_t     disk_bytes;
-    double      avg_temporal_score;
-    int         n_shards;
-    int         n_replicas;
+    int64_t     vector_count       = 0;
+    int64_t     edge_count         = 0;
+    int64_t     disk_bytes         = 0;
+    double      avg_temporal_score = 0.0;
+    int         n_shards           = 0;
+    int         n_replicas         = 0;
     std::string index_type;
+    int         dim                = 0;
+    std::string metric;
+    std::optional<SupersessionConfig> supersession;  // set when enabled
 };
 
 } // namespace tidevec

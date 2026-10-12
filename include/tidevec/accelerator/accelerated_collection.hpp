@@ -87,8 +87,11 @@ public:
         accel::DeviceType device_hint = accel::DeviceType::AUTO)
     {
         // Choose path
+        // Structured filters and as_of need the payload / created_at
+        // indexes, which live in the CPU index.
         bool use_accel = cfg_.use_accel_for_search
-            && (static_cast<int>(1) >= cfg_.accel_batch_threshold);
+            && (static_cast<int>(1) >= cfg_.accel_batch_threshold)
+            && !opts.filter_expr && !opts.as_of;
 
         if (!use_accel) {
             return durable_.search(query, opts, trace);
@@ -148,8 +151,8 @@ public:
             float accel_sim = 1.0f - accel_res.distances[i];
             // Temporal score
             float tw = scorer.temporal_weight_raw(meta.created_at, qt);
-            float alpha = 1.0f - opts.temporal_blend;
-            float beta  = opts.temporal_blend;
+            float beta  = opts.blend_or(cfg_.durable.temporal.temporal_blend);
+            float alpha = 1.0f - beta;
             float final_score = alpha * accel_sim + beta * tw;
 
             SearchResult r;
@@ -167,6 +170,10 @@ public:
             }
             candidates.push_back(std::move(r));
         }
+
+        apply_supersession(candidates, opts, [this](const std::string& id) {
+            return durable_.superseded_by(id);
+        });
 
         // Sort by final_score descending, take top_k
         int k = std::min(opts.top_k, static_cast<int>(candidates.size()));
@@ -246,7 +253,8 @@ public:
 
                 float sim = 1.0f - accel_res.distances[q * k * 4 + i];
                 float tw  = scorer.temporal_weight_raw(meta.created_at, qt);
-                float fs  = (1.0f - opts.temporal_blend) * sim + opts.temporal_blend * tw;
+                float b   = opts.blend_or(cfg_.durable.temporal.temporal_blend);
+                float fs  = (1.0f - b) * sim + b * tw;
 
                 SearchResult r;
                 r.id = id; r.score = fs; r.vector_score = sim;
@@ -289,6 +297,7 @@ public:
     }
 
     std::size_t recover() { return durable_.recover(); }
+    const DurableCollection& durable() const { return durable_; }
     std::size_t n_shards() const { return durable_.n_shards(); }
     uint64_t total_writes()  const { return durable_.total_writes(); }
     uint64_t total_queries() const { return durable_.total_queries(); }
