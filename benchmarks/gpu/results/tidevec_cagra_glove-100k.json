@@ -1,0 +1,1 @@
+{"engine":"cagra","n":100000,"d":100,"nq":10000,"runs":[{"itopk":64,"recall":0.01238,"qps":456239,"build_s":6.44784},{"itopk":128,"recall":0.01144,"qps":181987,"build_s":6.44987},{"itopk":256,"recall":0.01308,"qps":86895.6,"build_s":6.47849}],"degree":64,"nn_descent_iter":20,"gpu":"NVIDIA GeForce RTX 4060 Ti"}

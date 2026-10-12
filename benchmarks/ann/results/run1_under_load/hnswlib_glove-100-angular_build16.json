@@ -1,0 +1,1 @@
+{"engine": "hnswlib", "n": 1183514, "d": 100, "nq": 10000, "metric": "cosine", "M": 16, "ef_construction": 200, "build_threads": 16, "build_s": 47.89771855400022, "index_rss_mb": 766.21484375, "peak_rss_mb": 1261.265625, "runs": []}
