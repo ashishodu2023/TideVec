@@ -1,13 +1,23 @@
 apiVersion: v2
 name: tidevec
-description: Temporally-aware vector database — Helm chart
+description: TideVec — the vector database that knows when facts change (temporal decay, supersession, causal edges)
 type: application
-version: 0.2.0
-appVersion: "0.2.0"
+version: 0.3.0
+appVersion: "0.3.0"
+kubeVersion: ">=1.23.0-0"
+home: https://tidevec.com
+sources:
+  - https://github.com/ashishodu2023/TideVec
 keywords:
   - vector-database
   - tidevec
+  - rag
+  - agent-memory
   - ai
 maintainers:
   - name: TideVec Team
+    email: contact@tidevec.com
     url: https://tidevec.com
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/category: database
