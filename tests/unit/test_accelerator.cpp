@@ -33,10 +33,14 @@ static int tests_run = 0, tests_passed = 0;
 #define TEST(name) static void test_##name(); \
     struct _r_##name { _r_##name(){ run_test(#name, test_##name); } } _i_##name; \
     static void test_##name()
-#define ASSERT(c) do { if(!(c)){ std::cerr<<"  FAIL: "#c" line "<<__LINE__<<"\n"; return; } } while(0)
+static bool g_current_test_failed = false;
+#define ASSERT(c) do { if(!(c)){ std::cerr<<"  FAIL: "#c" line "<<__LINE__<<"\n"; g_current_test_failed = true; return; } } while(0)
 #define ASSERT_NEAR(a,b,e) ASSERT(std::abs((float)(a)-(float)(b)) < (float)(e))
 static void run_test(const char* n, void(*f)()) {
-    ++tests_run; std::cout<<"[TEST] "<<n<<" ... "; f(); ++tests_passed; std::cout<<"PASS\n";
+    ++tests_run; std::cout<<"[TEST] "<<n<<" ... ";
+    g_current_test_failed = false; f();
+    if (g_current_test_failed) { std::cout<<"FAILED\n"; return; }
+    ++tests_passed; std::cout<<"PASS\n";
 }
 
 // ---- helpers ---------------------------------------------------

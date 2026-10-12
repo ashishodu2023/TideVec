@@ -32,7 +32,7 @@ public:
         db_.add_edges(name_, edges, src_id);
     }
 
-    void set_temporal(int64_t half_life_ms, float blend = 0.3f) {
+    void set_temporal(int64_t half_life_ms, std::optional<float> blend = std::nullopt) {
         db_.set_temporal(name_, half_life_ms, blend);
     }
 

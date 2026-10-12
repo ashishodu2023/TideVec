@@ -3,6 +3,7 @@
 #include <tidevec/core/cortex_vector.hpp>
 #include <tidevec/core/metrics.hpp>
 #include <tidevec/core/temporal_scorer.hpp>
+#include <tidevec/core/filter.hpp>
 
 #include <vector>
 #include <string>
@@ -78,8 +79,9 @@ public:
         if (query.size() != expected_dim_)
             throw std::invalid_argument("Query dimension mismatch");
 
-        Timestamp qt = now_ms();
+        Timestamp qt = opts.as_of ? *opts.as_of : now_ms();
         Metric m = parse_metric(opts.metric);
+        const FilterPtr filter = effective_filter(opts);
 
         struct Candidate {
             std::size_t idx;
@@ -96,11 +98,12 @@ public:
             if (!v.is_valid_at(qt)) continue;
             if (scorer_.is_hard_excluded(v, qt)) continue;
 
-            // Apply payload filter (simple key=value)
-            if (!opts.filter.empty() && !matches_filter(v, opts.filter)) continue;
+            if (filter && !filter->matches(v)) continue;
 
             float sim = compute_similarity(query, v.embedding, m);
             auto  ts  = scorer_.score(v, sim, qt);
+            float b   = opts.blend_or(scorer_.config().temporal_blend);
+            ts.final_score = (1.0f - b) * sim + b * ts.temporal_weight;
 
             candidates.push_back({i, ts.final_score, ts});
         }
@@ -163,17 +166,37 @@ public:
         scorer_.set_config(cfg);
     }
 
-private:
-    // Simple filter: "key=value" format
-    static bool matches_filter(const CortexVector& v, const std::string& filter) {
-        auto eq = filter.find('=');
-        if (eq == std::string::npos) return true;
-        std::string key = filter.substr(0, eq);
-        std::string val = filter.substr(eq + 1);
-        auto it = v.payload.find(key);
-        return (it != v.payload.end() && it->second == val);
+    // Up to `limit` live vectors with id > `after`, in id order.
+    std::vector<CortexVector> scroll(const std::string& after, std::size_t limit,
+                                     const QueryOptions& opts,
+                                     bool with_vector = false) const {
+        std::shared_lock lock(mutex_);
+        const FilterPtr filter = effective_filter(opts);
+        const Timestamp now = now_ms();
+        std::vector<std::pair<std::string, std::size_t>> ids;
+        for (const auto& [id, idx] : id_to_idx_)
+            if (id > after) ids.emplace_back(id, idx);
+        std::sort(ids.begin(), ids.end());
+        std::vector<CortexVector> out;
+        for (const auto& [id, idx] : ids) {
+            if (out.size() >= limit) break;
+            const auto& v = vectors_[idx];
+            if (v.valid_until && now > *v.valid_until) continue;
+            if (filter && !filter->matches(v)) continue;
+            out.push_back(v);
+            if (!with_vector) out.back().embedding.clear();
+        }
+        return out;
     }
 
+    std::vector<CortexVector> all_vectors() const {
+        std::shared_lock lock(mutex_);
+        std::vector<CortexVector> out;
+        for (const auto& [id, idx] : id_to_idx_) out.push_back(vectors_[idx]);
+        return out;
+    }
+
+private:
     std::size_t expected_dim_;
     Metric metric_;
     TemporalScorer scorer_;

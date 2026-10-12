@@ -2,23 +2,23 @@
 // ================================================================
 // erasure/reed_solomon.hpp — Reed-Solomon erasure coding
 //
-// Why this gives 11 nines (99.999999999%) durability:
-//
-//   3-way replication: survives 2 node failures → ~5-6 nines
+// Why erasure coding:
 //
 //   RS(10,4) erasure coding:
 //     · Split data into 10 data shards + 4 parity shards = 14 total
 //     · Any 10 of 14 shards reconstruct original data
-//     · Survives ANY 4 simultaneous disk failures
+//     · Survives ANY 4 simultaneous shard losses
 //     · Storage overhead: 14/10 = 1.4× (vs 3× for replication)
 //
-//   Durability math (RS 10+4, 14 shards, p_fail=0.0041/year per disk):
-//     P(lose data) = P(≥5 of 14 disks fail simultaneously)
-//     = C(14,5) × p^5 × (1-p)^9 + ...
-//     ≈ 1.7 × 10^-11 per year
-//     = 99.999999998% durability (~11 nines)
-//
-//   This is how AWS S3 achieves 11 nines durability.
+//   Durability model (durability_loss_probability): shards on
+//   independent disks, each lost with p = 0.004/year (Backblaze AFR),
+//   no repair within the year:
+//     P(lose data) = P(≥5 of 14 shards lost) ≈ C(14,5)·p^5 ≈ 2.0e-9/yr
+//     = 8.7 nines   (3-way replication: 7.2, RS(6,3): 7.5, RS(14,4): 8.1)
+//   Repairing lost shards within hours raises this by orders of
+//   magnitude; that is not modelled here. Placing every shard on one
+//   host (the current single-process deployment) makes the host, not
+//   the disks, the failure domain.
 //
 // Implementation:
 //   GF(2^8) arithmetic over Galois Field
@@ -315,9 +315,27 @@ public:
     }
 
     double durability_nines(double p_fail) const {
-        double loss = durability_loss_probability(p_fail);
+        return nines_from_loss(durability_loss_probability(p_fail));
+    }
+
+    // P(more than `tolerate` of n independent shards are lost), each
+    // with probability p.
+    static double loss_probability(int n, int tolerate, double p) {
+        if (tolerate < 0) return 1.0;
+        double total = 0.0, binom = 1.0;
+        for (int i = 0; i <= n; ++i) {
+            if (i > 0) binom = binom * (n - i + 1) / i;
+            if (i > tolerate)
+                total += binom * std::pow(p, i) * std::pow(1.0 - p, n - i);
+        }
+        return total;
+    }
+
+    // "Nines" of durability: -log10(P(loss)); 99.9999999% = 9 nines.
+    static double nines_from_loss(double loss) {
         if (loss <= 0) return 99.0;
-        return -std::log10(loss) + 2.0;  // nines count
+        if (loss >= 1) return 0.0;
+        return -std::log10(loss);
     }
 
 private:
@@ -334,7 +352,7 @@ private:
 //
 // Default RS(10,4): 14 total shards, survives 4 simultaneous failures
 // Storage overhead: 1.4× vs 3× for 3-way replication
-// Durability at p_fail=0.004/year: ~11 nines
+// Modelled durability at p_fail=0.004/year: 8.7 nines (see top of file)
 // ================================================================
 struct ShardLocation {
     int   node_id;

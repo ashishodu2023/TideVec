@@ -1,43 +1,29 @@
 #pragma once
 // ================================================================
-// ultra_durable_collection.hpp — 11-nines durability + 99.9999999% availability
+// ultra_durable_collection.hpp — erasure-coded, Raft-ordered collection
 //
-// Combines everything:
+// Combines:
 //
-//   Durability (99.999999999% = 11 nines):
-//     ├── RS(10,4) erasure coding          → survives 4 node failures
-//     ├── Multi-AZ shard placement         → survives AZ failure
-//     ├── WAL + group commit batching      → 10× write throughput
+//   Durability:
+//     ├── RS(10,4) erasure coding          → survives 4 shard losses
+//     ├── WAL + group commit batching      → fewer fsyncs per write
 //     ├── Background scrubbing             → detect silent corruption
-//     └── SIMD CRC64 per-block checksums  → catch bit rot
+//     └── Per-block checksums              → catch bit rot
 //
-//   Availability (99.9999999% = 9 nines):
-//     ├── Raft consensus (5-node)          → auto failover <150ms
-//     ├── Leader-based strong consistency  → no split-brain
-//     ├── Read-scale replica routing       → reads never blocked
-//     └── Health monitor + auto-repair     → MTTR < 1 hour
+//   Ordering / failover:
+//     ├── Raft log (in-process RaftGroup)  → single write order
+//     └── Health monitor + repair          → rebuild lost shards
 //
-//   Performance:
-//     ├── WAL group commit                 → batch 1000 writes/fsync
-//     ├── Async RS encoding               → parallel parity generation
-//     ├── Read path: skip WAL entirely    → sub-ms reads
-//     └── Hot segment cache (LRU, 10GB)   → 95%+ cache hit rate
+// Modelled durability (independent disks, p = 0.004/year, no repair):
+//   RS(10,4) loses data with P ≈ 2.0e-9/year = 8.7 nines. See
+//   erasure/reed_solomon.hpp for the model and its limits.
 //
-// DURABILITY MATH:
-//   RS(10,4): 14 shards, any 10 reconstruct data
-//   p_fail = 0.004/year per disk (Backblaze AFR Q4 2024)
-//   P(lose ≥5 shards) = C(14,5)*p^5*(1-p)^9 + ... ≈ 1.7×10^-11/year
-//   = 99.999999998% durability = 10.8 nines ≈ 11 nines ✓
-//
-//   For 11 full nines: use RS(10,4) across 3 AZs (min 3 shards/AZ)
-//   Then AZ failure takes out ≤4 shards → still reconstructible ✓
-//
-// AVAILABILITY MATH:
-//   5-node Raft, p_node_down = 0.001 (0.1% per node)
-//   P(≥3 of 5 down) = C(5,3)*p^3 + C(5,4)*p^4 + C(5,5)*p^5
-//   ≈ 10*(0.001)^3 ≈ 1×10^-8
-//   = 99.999999% = 8 nines
-//   With multiple AZs: 99.9999999% = 9 nines ✓
+// Deployment caveat: all shards and all Raft members of this class
+// live in one process on one host, so host loss is the dominant
+// failure mode and the figures above are what the coding scheme
+// allows across independent disks, not what this deployment gives.
+// Multi-process replication is the separate, experimental
+// `tidevec-server --node-id/--raft-peers` cluster mode.
 // ================================================================
 
 #include <tidevec/cluster/durable_collection.hpp>
@@ -228,6 +214,7 @@ public:
         // Index
         TemporalConfig temporal;
         TVIndexConfig  tvindex;
+        SupersessionConfig supersession;
 
         // Storage
         std::string data_dir = "./tidevec_data";
@@ -250,22 +237,22 @@ public:
     // ------ Write API (goes through Raft → WAL → index) ----------
 
     void upsert(const CortexVector& vec) {
-        // 1. Submit to Raft (ensures linearisable ordering)
+        // Submit to Raft (linearisable ordering), then block until the
+        // committed entry has been applied so reads see the write.
         auto payload = serialize_vector(vec);
         auto idx = raft_->submit("UPSERT", payload);
         if (!idx) throw std::runtime_error("Raft: not leader or no quorum");
-
-        // 2. WAL group commit (batches fsyncs, 1000 writes per fsync)
-        // (already handled by Raft log persistence in production)
-        // 3. Apply to in-memory index (done by Raft apply_fn callback)
-
+        _wait_applied(*idx);
         ++total_writes_;
     }
 
     bool remove(const std::string& id) {
+        if (!underlying_->contains(id)) return false;
         std::vector<uint8_t> payload(id.begin(), id.end());
         auto idx = raft_->submit("DELETE", payload);
-        return idx.has_value();
+        if (!idx) throw std::runtime_error("Raft: not leader or no quorum");
+        _wait_applied(*idx);
+        return true;
     }
 
     void add_edge(const std::string& src, const std::string& tgt,
@@ -281,7 +268,9 @@ public:
         payload.push_back(static_cast<uint8_t>(type));
         auto* wp = reinterpret_cast<const uint8_t*>(&weight);
         payload.insert(payload.end(), wp, wp+4);
-        raft_->submit("ADD_EDGE", payload);
+        auto idx = raft_->submit("ADD_EDGE", payload);
+        if (!idx) throw std::runtime_error("Raft: not leader or no quorum");
+        _wait_applied(*idx);
     }
 
     // ------ Read API (bypasses Raft, reads from local index) ------
@@ -361,6 +350,7 @@ public:
     bool is_leader() const { return raft_ && raft_->leader() != nullptr; }
 
     const erasure::ReedSolomon& rs_codec() const { return rs_; }
+    const DurableCollection& underlying() const { return *underlying_; }
 
     // Delegation to underlying DurableCollection (REST server API)
     std::size_t total_vectors() const {
@@ -397,6 +387,8 @@ private:
         dcfg.write_quorum = 1;
         dcfg.data_dir     = cfg_.data_dir;
         dcfg.temporal     = cfg_.temporal;
+        dcfg.tvindex      = cfg_.tvindex;
+        dcfg.supersession = cfg_.supersession;
         underlying_       = std::make_unique<DurableCollection>(dcfg);
 
         // 2. Raft group (5 nodes for 2-failure tolerance)
@@ -408,9 +400,8 @@ private:
             false  // verbose
         );
         raft_->start();
-
-        // Allow leader election to complete
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        if (!raft_->wait_for_leader(5000))
+            throw std::runtime_error("Raft: no leader elected within 5s");
 
         // 3. WAL group commit
         WalGroupCommit::Config wcfg;
@@ -439,7 +430,11 @@ private:
         health_->start();
     }
 
+    // Every Raft node calls this for every committed entry, but all nodes
+    // share one in-process state machine, so each log index is applied once.
     void _apply_raft_entry(const consensus::LogEntry& entry) {
+        std::lock_guard lock(apply_mu_);
+        if (entry.index <= applied_index_) return;
         if (entry.op == "UPSERT") {
             std::size_t off = 0;
             auto vec = deserialize_vector(entry.payload.data(), off);
@@ -447,7 +442,21 @@ private:
         } else if (entry.op == "DELETE") {
             std::string id(entry.payload.begin(), entry.payload.end());
             underlying_->remove(id);
+        } else if (entry.op == "ADD_EDGE") {
+            std::size_t off = 0;
+            auto e = deserialize_edge(entry.payload.data(), off);
+            underlying_->add_edge(e.src, e.tgt, e.type, e.weight);
         }
+        applied_index_ = entry.index;
+        apply_cv_.notify_all();
+    }
+
+    void _wait_applied(consensus::Index idx, int timeout_ms = 5000) {
+        std::unique_lock lock(apply_mu_);
+        if (!apply_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+                                [&]{ return applied_index_ >= idx; }))
+            throw std::runtime_error("Raft: entry " + std::to_string(idx) +
+                                     " not applied within timeout");
     }
 
     std::string _startup_banner() const {
@@ -485,6 +494,10 @@ private:
     std::unique_ptr<consensus::RaftGroup>        raft_;
     std::unique_ptr<WalGroupCommit>              wal_gc_;
     std::unique_ptr<health::HealthMonitor>       health_;
+
+    std::mutex              apply_mu_;
+    std::condition_variable apply_cv_;
+    consensus::Index        applied_index_ = 0;
 
     std::atomic<uint64_t> total_writes_{0};
     std::atomic<uint64_t> total_queries_{0};

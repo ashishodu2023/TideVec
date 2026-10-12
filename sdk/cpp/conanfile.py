@@ -5,7 +5,7 @@ import os
 
 class TideVecConan(ConanFile):
     name        = "tidevec"
-    version     = "0.1.0"
+    version     = "0.3.0"
     license     = "Apache-2.0"
     author      = "Ashish Verma <contact@getcortexops.com>"
     url         = "https://github.com/ashishodu2023/TideVec"

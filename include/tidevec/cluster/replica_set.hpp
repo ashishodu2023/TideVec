@@ -179,6 +179,12 @@ public:
                     ++replayed;
                     break;
                 }
+                case WalOp::ADD_EDGE: {
+                    auto e = deserialize_edge(rec.payload.data(), off);
+                    primary_->add_edge(e.src, e.tgt, e.type, e.weight);
+                    ++replayed;
+                    break;
+                }
                 default: break;
             }
         });
@@ -202,6 +208,11 @@ public:
                     replicas_[replica_idx]->remove(id);
                     break;
                 }
+                case WalOp::ADD_EDGE: {
+                    auto e = deserialize_edge(rec.payload.data(), off);
+                    replicas_[replica_idx]->add_edge(e.src, e.tgt, e.type, e.weight);
+                    break;
+                }
                 default: break;
             }
         });
@@ -215,6 +226,14 @@ public:
     // Expose primary Collection for DriftBridge snapshotting.
     Collection*       primary()       { return primary_.get(); }
     const Collection* primary() const { return primary_.get(); }
+
+    // Primary and every replica (all serve reads). Not synchronised with
+    // failover_primary().
+    template <typename Fn>
+    void for_each_collection(Fn&& fn) {
+        fn(*primary_);
+        for (auto& r : replicas_) fn(*r);
+    }
 
 private:
     Config cfg_;

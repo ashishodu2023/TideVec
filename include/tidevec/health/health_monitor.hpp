@@ -2,9 +2,9 @@
 // ================================================================
 // health/health_monitor.hpp — Continuous background health system
 //
-// For 11-nines availability you need active self-healing, not just
-// passive replication. The HealthMonitor runs background goroutines
-// that continuously:
+// Erasure coding only stays durable if lost shards are noticed and
+// rebuilt. The HealthMonitor runs background threads that
+// continuously:
 //
 //   1. SCRUB: verify checksums of all stored segments
 //              detect silent data corruption (bit rot)
@@ -48,9 +48,11 @@
 #include <unordered_set>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <thread>
 #include <chrono>
 #include <functional>
+#include <queue>
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -182,7 +184,11 @@ public:
     }
 
     void stop() {
-        running_ = false;
+        {
+            std::lock_guard lock(stop_mu_);
+            running_ = false;
+        }
+        stop_cv_.notify_all();
         if (heartbeat_thread_.joinable()) heartbeat_thread_.join();
         if (scrub_thread_.joinable())     scrub_thread_.join();
         if (repair_thread_.joinable())    repair_thread_.join();
@@ -226,8 +232,11 @@ public:
         int n_failed  = static_cast<int>(failed_nodes_.size());
         int n_healthy = cfg_.n_nodes - n_failed;
 
-        // Effective p_fail accounts for currently failed nodes
+        // Shards already lost reduce how many more failures the stripe
+        // can absorb.
         double eff_p = cfg_.p_disk_failure_year;
+        int remaining = cfg_.n_nodes - n_failed;
+        int tolerate  = cfg_.rs_m - n_failed;
 
         DurabilityReport rep;
         rep.n_nodes_total   = cfg_.n_nodes;
@@ -235,8 +244,8 @@ public:
         rep.n_nodes_failed  = n_failed;
         rep.rs_k = cfg_.rs_k;
         rep.rs_m = cfg_.rs_m;
-        rep.p_loss_per_year = rs_.durability_loss_probability(eff_p);
-        rep.effective_nines = rs_.durability_nines(eff_p);
+        rep.p_loss_per_year = erasure::ReedSolomon::loss_probability(remaining, tolerate, eff_p);
+        rep.effective_nines = erasure::ReedSolomon::nines_from_loss(rep.p_loss_per_year);
         rep.shards_at_risk  = static_cast<int>(at_risk_segments_.size());
 
         if (n_failed == 0)
@@ -275,11 +284,17 @@ public:
     const std::vector<NodeStatus>& node_statuses() const { return node_status_; }
 
 private:
+    // Returns false if stop() was called during the wait.
+    bool _sleep_unless_stopped(std::chrono::milliseconds d) {
+        std::unique_lock lock(stop_mu_);
+        return !stop_cv_.wait_for(lock, d, [this]{ return !running_; });
+    }
+
     // ------ Heartbeat loop --------------------------------------
     void _heartbeat_loop() {
         while (running_) {
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(cfg_.heartbeat_interval_ms));
+            if (!_sleep_unless_stopped(
+                    std::chrono::milliseconds(cfg_.heartbeat_interval_ms))) break;
 
             if (!heartbeat_fn_) continue;
 
@@ -316,7 +331,7 @@ private:
     // ------ Scrub loop ------------------------------------------
     void _scrub_loop() {
         // Stagger first scrub by a few minutes
-        std::this_thread::sleep_for(std::chrono::minutes(5));
+        if (!_sleep_unless_stopped(std::chrono::minutes(5))) return;
 
         while (running_) {
             // Scrub all registered segments
@@ -354,16 +369,15 @@ private:
                           << " segments, " << corrupt << " corrupt\n";
 
             // Sleep until next scrub
-            auto sleep_ms = cfg_.scrub_interval_ms;
-            for (int i = 0; i < sleep_ms/1000 && running_; ++i)
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (!_sleep_unless_stopped(
+                    std::chrono::milliseconds(cfg_.scrub_interval_ms))) return;
         }
     }
 
     // ------ Repair loop -----------------------------------------
     void _repair_loop() {
         while (running_) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            if (!_sleep_unless_stopped(std::chrono::seconds(1))) break;
 
             int node_to_repair = -1;
             {
@@ -450,6 +464,8 @@ private:
     AlertFn     alert_fn_;
 
     std::atomic<bool>     running_{false};
+    std::mutex              stop_mu_;
+    std::condition_variable stop_cv_;
     std::atomic<uint64_t> scrubs_completed_{0};
     std::atomic<uint64_t> repairs_completed_{0};
     std::atomic<uint64_t> total_failures_{0};

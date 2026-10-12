@@ -166,6 +166,22 @@ inline CortexVector deserialize_vector(const uint8_t* p, std::size_t& off) {
     return v;
 }
 
+struct WalEdge {
+    std::string src;
+    std::string tgt;
+    EdgeType    type;
+    float       weight;
+};
+
+inline WalEdge deserialize_edge(const uint8_t* p, std::size_t& off) {
+    WalEdge e;
+    e.src  = deserialize_string(p, off);
+    e.tgt  = deserialize_string(p, off);
+    e.type = static_cast<EdgeType>(p[off++]);
+    std::memcpy(&e.weight, p + off, 4); off += 4;
+    return e;
+}
+
 // ================================================================
 // WriteAheadLog
 // ================================================================

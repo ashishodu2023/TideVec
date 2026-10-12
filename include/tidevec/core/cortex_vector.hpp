@@ -5,9 +5,13 @@
 #include <unordered_map>
 #include <chrono>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 
 namespace tidevec {
+
+struct FilterExpr;  // core/filter.hpp
 
 // ------------------------------------------------------------------
 // Timestamp — milliseconds since epoch
@@ -29,18 +33,22 @@ enum class EdgeType : uint8_t {
     UPDATES     = 2,
     RELATED_TO  = 3,
     ENTITY_OF   = 4,
-    SUPPORTS    = 5
+    SUPPORTS    = 5,
+    // Reverse of UPDATES (older → newer). Stored on the older vector's
+    // shard so search can flag superseded results without a cross-shard hop.
+    SUPERSEDED_BY = 6
 };
 
 inline std::string edge_type_str(EdgeType t) {
     switch (t) {
-        case EdgeType::CAUSES:      return "CAUSES";
-        case EdgeType::CONTRADICTS: return "CONTRADICTS";
-        case EdgeType::UPDATES:     return "UPDATES";
-        case EdgeType::RELATED_TO:  return "RELATED_TO";
-        case EdgeType::ENTITY_OF:   return "ENTITY_OF";
-        case EdgeType::SUPPORTS:    return "SUPPORTS";
-        default:                    return "UNKNOWN";
+        case EdgeType::CAUSES:        return "CAUSES";
+        case EdgeType::CONTRADICTS:   return "CONTRADICTS";
+        case EdgeType::UPDATES:       return "UPDATES";
+        case EdgeType::RELATED_TO:    return "RELATED_TO";
+        case EdgeType::ENTITY_OF:     return "ENTITY_OF";
+        case EdgeType::SUPPORTS:      return "SUPPORTS";
+        case EdgeType::SUPERSEDED_BY: return "SUPERSEDED_BY";
+        default:                      return "UNKNOWN";
     }
 }
 
@@ -130,6 +138,23 @@ struct SearchResult {
     // causal expansion
     std::vector<std::string> causal_neighbors;
     std::vector<std::string> contradicted_by;
+    std::vector<std::string> superseded_by;   // newer versions of this vector
+
+    // BM25 score when the query had text (keyword or hybrid search).
+    float text_score = 0.0f;
+};
+
+// Hybrid (dense + BM25) fusion settings, used when a query has both a
+// vector and text.
+enum class FusionMethod { RRF, WEIGHTED };
+
+struct HybridOptions {
+    FusionMethod fusion = FusionMethod::RRF;
+    // Weight of the dense list (1 - alpha for the keyword list).
+    float alpha    = 0.5f;
+    int   rrf_k    = 60;
+    // Candidates fetched from each list before fusion (0 = max(4*top_k, 50)).
+    int   prefetch = 0;
 };
 
 // ------------------------------------------------------------------
@@ -144,14 +169,35 @@ enum class QueryMode {
 
 struct QueryOptions {
     int        top_k            = 10;
-    float      temporal_blend   = 0.3f;   // α=1-blend (semantic), β=blend (temporal)
+    // α=1-blend (semantic), β=blend (temporal). Negative = use the
+    // collection's configured blend.
+    float      temporal_blend   = -1.0f;
     QueryMode  mode             = QueryMode::VECTOR_ONLY;
     int        causal_hops      = 1;
-    std::string filter          = "";      // simple key=value for now
+    std::string filter          = "";      // legacy key=value
+    // Structured filter (AND/OR/IN/ranges); ANDed with `filter`.
+    std::shared_ptr<const FilterExpr> filter_expr;
+    // Point-in-time query: only vectors created at or before as_of, scored
+    // as if queried at as_of, and supersession links whose newer version
+    // existed at as_of.
+    std::optional<Timestamp> as_of;
+    // created_at of any vector id in the collection, used by as_of queries
+    // to date supersession links across shards. Unset = look up locally.
+    std::function<std::optional<Timestamp>(const std::string&)> created_at_of;
+    // Keyword query for BM25 / hybrid search.
+    std::string text;
+    HybridOptions hybrid;
     std::string metric          = "cosine";
     bool       include_trace    = false;
     bool       include_staleness_warnings = true;
     int        ef_search        = 128;    // HNSW search width
+    // Score multiplier (1 - penalty) for results that have a newer version.
+    // 0 = annotate only, 1 = push superseded results to the bottom.
+    float      superseded_penalty = 0.0f;
+
+    float blend_or(float collection_blend) const {
+        return temporal_blend < 0.0f ? collection_blend : temporal_blend;
+    }
 };
 
 } // namespace tidevec

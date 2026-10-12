@@ -6,7 +6,7 @@
 // Install via CMake FetchContent:
 //   FetchContent_Declare(tidevec
 //     GIT_REPOSITORY https://github.com/ashishodu2023/TideVec.git
-//     GIT_TAG        v0.1.0
+//     GIT_TAG        v0.3.0
 //     
 //   )
 //   FetchContent_MakeAvailable(tidevec)
