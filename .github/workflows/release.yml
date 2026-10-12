@@ -4,9 +4,11 @@
 #   1. checks every version string equals the tag
 #   2. runs the full CI suite (ci.yml) as a gate
 #   3. builds tidevec (pure Python) and tidevec-embedded (cibuildwheel:
-#      manylinux x86_64/aarch64, macOS arm64, CPython 3.9-3.13 + sdist)
+#      manylinux + musllinux x86_64/aarch64, macOS arm64 + x86_64,
+#      CPython 3.9-3.13 + sdist)
 #   4. installs `tidevec[embedded]` from those artifacts on Linux x86_64,
-#      Linux arm64 and macOS arm64 and runs examples/01_quickstart_embedded.py
+#      Linux arm64, macOS arm64 and Alpine (musl) and runs
+#      examples/01_quickstart_embedded.py
 #   5. builds the CPU image per arch, runs the README snippet against it,
 #      then pushes a multi-arch manifest; builds the GPU/TPU images
 #   6. publishes to PyPI, Docker Hub, GitHub Packages (Java) and a GitHub
@@ -131,17 +133,27 @@ jobs:
         with:
           package-dir: sdk/python-embedded
           output-dir: wheelhouse
+        # macOS x86_64 is cross-compiled on the arm64 runner (GitHub has no
+        # Intel macOS image left) and cannot be tested there.
         env:
           CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
-          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"
-          CIBW_ARCHS_MACOS: arm64
+          CIBW_SKIP: "*-manylinux_i686 *-musllinux_i686"
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_TEST_SKIP: "*-macosx_x86_64"
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_MUSLLINUX_X86_64_IMAGE: musllinux_1_2
+          CIBW_MUSLLINUX_AARCH64_IMAGE: musllinux_1_2
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.3
           CIBW_BEFORE_TEST: pip install {project}/sdk/python
+          CIBW_TEST_REQUIRES_LINUX: pytest
           CIBW_TEST_COMMAND: >-
             python {project}/scripts/release_smoke_test.py --embedded
             --expect-version ${{ needs.versions.outputs.version }}
+          CIBW_TEST_COMMAND_LINUX: >-
+            python {project}/scripts/release_smoke_test.py --embedded
+            --expect-version ${{ needs.versions.outputs.version }} &&
+            python -m pytest -q -p no:cacheprovider {project}/sdk/python/tests -k local
 
       - uses: actions/upload-artifact@v4
         with:
@@ -203,6 +215,40 @@ jobs:
           /tmp/venv/bin/python "$GITHUB_WORKSPACE/scripts/release_smoke_test.py" --embedded \
             --expect-version "${{ needs.versions.outputs.version }}"
           echo "install + quickstart took $(( $(date +%s) - START ))s"
+
+  # JavaScript actions do not run inside Alpine containers, so the musl
+  # check runs `docker run` from the Ubuntu host.
+  install-check-musl:
+    name: Install check (Alpine, py${{ matrix.python }})
+    needs: [versions, dist-python, wheels-embedded]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            examples
+            scripts
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: pip install "tidevec[embedded]" on python:${{ matrix.python }}-alpine
+        env:
+          VERSION: ${{ needs.versions.outputs.version }}
+        run: |
+          docker run --rm -v "$PWD:/w:ro" -e VERSION "python:${{ matrix.python }}-alpine" sh -euc '
+            python -m venv /tmp/venv
+            /tmp/venv/bin/pip install --only-binary tidevec-embedded \
+              --find-links /w/dist "tidevec[embedded]==$VERSION"
+            cd /tmp
+            /tmp/venv/bin/python /w/examples/01_quickstart_embedded.py
+            /tmp/venv/bin/python /w/scripts/release_smoke_test.py --embedded --expect-version "$VERSION"
+          '
 
   # ── 5a. CPU image: build per arch, smoke test, push by digest ───
   docker-cpu:
@@ -365,7 +411,7 @@ jobs:
   # tidevec-embedded goes first: tidevec[embedded] depends on it.
   publish-pypi:
     name: Publish to PyPI
-    needs: [versions, ci, install-check, sdist-embedded, docker-cpu]
+    needs: [versions, ci, install-check, install-check-musl, sdist-embedded, docker-cpu]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     environment:
@@ -397,7 +443,7 @@ jobs:
 
   publish-testpypi:
     name: Publish to TestPyPI (dry run)
-    needs: [versions, install-check, sdist-embedded]
+    needs: [versions, install-check, install-check-musl, sdist-embedded]
     if: github.event_name == 'workflow_dispatch' && inputs.testpypi
     runs-on: ubuntu-24.04
     environment: testpypi

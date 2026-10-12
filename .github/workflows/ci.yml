@@ -3,12 +3,24 @@ name: TideVec CI
 # Tests and build checks on every push and PR. Publishing lives in
 # release.yml (v* tags), which also calls this workflow as its test gate;
 # Docker images for main are built by docker.yml.
+#
+# The nightly schedule (or a manual run with `nightly` checked) also runs
+# the long jobs: the 1M-vector filter benchmark, a Raft chaos run and
+# musllinux wheels.
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      nightly:
+        description: Also run the nightly jobs (filter benchmark, chaos, musllinux wheels)
+        type: boolean
+        default: true
   workflow_call:
     inputs:
       skip_wheels:
@@ -22,7 +34,8 @@ permissions:
 jobs:
 
   # ================================================================
-  # Version strings agree (server, CMake, Python, Java, C++, Docker, Helm)
+  # Version strings agree (server, CMake, Python, Java, C++, TypeScript,
+  # Docker, Helm, MCP registry, Homebrew)
   # ================================================================
   versions:
     name: Version consistency
@@ -76,12 +89,23 @@ jobs:
       - name: Durability / Raft tests
         run: timeout 300 ./build/tidevec_eleven_nines_tests
 
+      - name: Security tests
+        run: timeout 300 ./build/tidevec_security_tests
+
+      - name: C++ SDK tests
+        run: timeout 120 ./build/tidevec_cpp_sdk_tests
+
+      - name: Raft cluster tests
+        run: timeout 300 ./build/tidevec_cluster_tests
+
       - name: Upload server binary for SDK tests
         if: matrix.os == 'ubuntu-22.04'
         uses: actions/upload-artifact@v4
         with:
           name: tidevec-server-linux
-          path: build/tidevec-server
+          path: |
+            build/tidevec-server
+            build/tidevec-router
           retention-days: 3
 
   # ================================================================
@@ -139,6 +163,50 @@ jobs:
           kill %1
 
   # ================================================================
+  # Python framework integrations — every optional extra installed
+  # (embedded, langchain, llamaindex, mcp via [all]; haystack, dspy,
+  # langgraph, crewai), so no integration test may skip.
+  # ================================================================
+  python-integrations:
+    name: Python integrations (${{ matrix.python-version }})
+    runs-on: ubuntu-22.04
+    needs: [cpp-test]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tidevec-server-linux
+          path: build
+
+      - name: Install SDK with all extras
+        run: |
+          chmod +x build/tidevec-server
+          ./scripts/sync_embedded_headers.sh
+          pip install ./sdk/python-embedded
+          pip install -e "sdk/python[all,dev,numpy,haystack,dspy,langgraph,crewai]"
+
+      - name: pytest (fails on any skipped test)
+        working-directory: sdk/python
+        shell: bash
+        env:
+          TIDEVEC_SERVER_BIN: ${{ github.workspace }}/build/tidevec-server
+        run: |
+          python -m pytest -q -rs | tee pytest.log
+          if grep -q '^SKIPPED' pytest.log; then
+            echo "::error::tests were skipped although every extra is installed"
+            exit 1
+          fi
+
+  # ================================================================
   # Python distributions build cleanly
   # ================================================================
   python-dist:
@@ -155,8 +223,36 @@ jobs:
           twine check --strict dist/*
 
   # ================================================================
+  # tidevec-mcp: thin launcher package for `uvx tidevec-mcp` (MCP
+  # registry entry: packaging/mcp/server.json)
+  # ================================================================
+  mcp-dist:
+    name: Python dists (tidevec-mcp)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Build and check
+        run: |
+          pip install build twine
+          python -m build packaging/pypi/tidevec-mcp --outdir dist-mcp
+          twine check --strict dist-mcp/*
+          python -m json.tool packaging/mcp/server.json > /dev/null
+      - name: Launcher installs and starts
+        run: |
+          ./scripts/sync_embedded_headers.sh
+          python -m venv /tmp/mcp
+          /tmp/mcp/bin/pip install ./sdk/python-embedded ./sdk/python dist-mcp/*.whl
+          /tmp/mcp/bin/tidevec-mcp --help
+
+  # ================================================================
   # Embedded engine wheels (tidevec-embedded) — Linux + macOS.
   # The storage layer uses POSIX I/O, so Windows is not supported yet.
+  # musllinux doubles the Linux build time, so PR/push runs build
+  # manylinux only; nightly runs and release.yml add musllinux.
+  # macOS x86_64 is cross-compiled on the arm64 runner (GitHub has no
+  # Intel macOS image left) and cannot be tested there.
   # ================================================================
   embedded-wheels:
     name: Embedded wheels (${{ matrix.os }})
@@ -180,13 +276,23 @@ jobs:
           output-dir: wheelhouse
         env:
           CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
-          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"
-          CIBW_ARCHS_MACOS: arm64
+          CIBW_SKIP: >-
+            ${{ github.event_name == 'schedule' && '*-manylinux_i686 *-musllinux_i686'
+                || '*-musllinux_* *-manylinux_i686' }}
+          CIBW_ARCHS_MACOS: "x86_64 arm64"
+          CIBW_TEST_SKIP: "*-macosx_x86_64"
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
           CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_MUSLLINUX_X86_64_IMAGE: musllinux_1_2
+          CIBW_MUSLLINUX_AARCH64_IMAGE: musllinux_1_2
           CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.3
           CIBW_BEFORE_TEST: pip install {project}/sdk/python
+          CIBW_TEST_REQUIRES_LINUX: pytest
           CIBW_TEST_COMMAND: python {project}/scripts/release_smoke_test.py --embedded
+          # Reopens databases too (persistence), which matters on musl.
+          CIBW_TEST_COMMAND_LINUX: >-
+            python {project}/scripts/release_smoke_test.py --embedded &&
+            python -m pytest -q -p no:cacheprovider {project}/sdk/python/tests -k local
 
       - uses: actions/upload-artifact@v4
         with:
@@ -358,6 +464,176 @@ jobs:
           name: tidevec-java-${{ github.sha }}
           path: sdk/java/target/tidevec-java-*.jar
           retention-days: 30
+
+  # ================================================================
+  # TypeScript — npm workspace (tidevec, @tidevec/ai-sdk,
+  # n8n-nodes-tidevec): build, typecheck, vitest. Live-server tests
+  # use the server artifact; TIDEVEC_REQUIRE_SERVER makes them fail
+  # instead of skipping if it is missing.
+  # ================================================================
+  typescript-sdk:
+    name: TypeScript SDK (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-22.04
+    needs: [cpp-test]
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: sdk/typescript/package-lock.json
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tidevec-server-linux
+          path: build
+
+      # --ignore-scripts: isolated-vm (pulled in by the n8n-workflow dev
+      # dependency) only compiles on Node >= 22, and no test loads it.
+      - name: Install, build, typecheck
+        working-directory: sdk/typescript
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build
+          npm run typecheck
+
+      - name: vitest
+        working-directory: sdk/typescript
+        env:
+          TIDEVEC_SERVER_BIN: ${{ github.workspace }}/build/tidevec-server
+          TIDEVEC_REQUIRE_SERVER: '1'
+        run: |
+          chmod +x "$TIDEVEC_SERVER_BIN"
+          npm test
+
+  # ================================================================
+  # Helm chart — lint (values.schema.json is enforced) and render the
+  # default, cluster and TLS + ingress + ServiceMonitor variants
+  # ================================================================
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Lint and render
+        run: |
+          C=deploy/helm/tidevec
+          helm lint --strict "$C"
+          helm lint --strict "$C" --set cluster.enabled=true --set replicaCount=3
+          helm template t "$C" > /dev/null
+          helm template t "$C" --kube-version 1.30.0 \
+            --set cluster.enabled=true --set replicaCount=3 > /dev/null
+          helm template t "$C" --api-versions monitoring.coreos.com/v1 \
+            --set tls.enabled=true --set tls.secretName=tidevec-tls \
+            --set ingress.enabled=true --set monitoring.serviceMonitor.enabled=true > /dev/null
+          if helm template t "$C" --set replicaCount=not-a-number > /dev/null 2>&1; then
+            echo "::error::values.schema.json accepted an invalid replicaCount"
+            exit 1
+          fi
+
+  # ================================================================
+  # Nightly: filtered-search recall and latency on 1M vectors
+  # (TEST filtered_recall_at_scale in tidevec_scale_tests)
+  # ================================================================
+  filter-bench:
+    name: Nightly filter benchmark (1M vectors)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build
+
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DTIDEVEC_BUILD_TESTS=ON \
+            -DTIDEVEC_MARCH=x86-64-v3 -GNinja
+          cmake --build build --target tidevec_scale_tests
+
+      - name: Scale tests with TIDEVEC_FILTER_BENCH_N=1000000
+        shell: bash
+        env:
+          TIDEVEC_FILTER_BENCH_N: '1000000'
+        run: |
+          ./build/tidevec_scale_tests | tee filter-bench.txt
+          {
+            echo '### Filtered search, 1M vectors'
+            echo '```'
+            grep 'recall@10' filter-bench.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: filter-bench-${{ github.run_id }}
+          path: filter-bench.txt
+          retention-days: 30
+
+  # ================================================================
+  # Nightly: Raft chaos run (tests/chaos/README.md). A new seed every
+  # night; the output directory is uploaded when the run fails.
+  # ================================================================
+  chaos:
+    name: Nightly chaos (Raft, 3 nodes)
+    needs: [cpp-test]
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.nightly)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tidevec-server-linux
+          path: build
+
+      - name: Checker self-tests
+        run: |
+          pip install pytest
+          chmod +x build/tidevec-server build/tidevec-router
+          python -m pytest -q tests/chaos/test_checker.py
+
+      - name: Cluster ops and multi-Raft router tests (fail on skips)
+        shell: bash
+        env:
+          TIDEVEC_SERVER_BIN: ${{ github.workspace }}/build/tidevec-server
+        run: |
+          python -m pytest -q -rs tests/cluster | tee cluster-pytest.log
+          if grep -q '^SKIPPED' cluster-pytest.log; then
+            echo "::error::cluster tests were skipped"; exit 1
+          fi
+
+      - name: chaos_runner.py --mode ci
+        env:
+          TIDEVEC_SERVER_BIN: ${{ github.workspace }}/build/tidevec-server
+        run: |
+          python tests/chaos/chaos_runner.py --mode ci --seed "${{ github.run_number }}" \
+            --out chaos-out
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: chaos-out-${{ github.run_id }}
+          path: chaos-out/
+          retention-days: 14
 
   # ================================================================
   # Security scan

@@ -126,14 +126,14 @@ Bugs found by the harness and fixed:
   entry at the same index look like ours. The write is now confirmed only
   if the entry at that index carries the expected term.
 
-## CI wiring (suggested)
+## CI wiring
 
-- Every PR: build `tidevec_cluster_tests` and run it; `pytest
-  tests/chaos/test_checker.py tests/cluster/test_cluster_ops.py
-  tests/cluster/test_multi_raft.py`; `chaos_runner.py --mode ci` (≈3 min).
-  Upload the output directory as an artifact on failure.
-- Nightly: `chaos_runner.py --mode nightly --nodes 3` and `--nodes 5`,
-  plus one `--read-consistency lease` run; weekly 24 h soak.
+- Every push and PR (`cpp-test` in `.github/workflows/ci.yml`): `tidevec_cluster_tests`.
+- Nightly (`chaos` job, also on manual dispatch): `pytest tests/chaos/test_checker.py`,
+  `pytest tests/cluster` (fails on skips) and `chaos_runner.py --mode ci` with the run number as
+  seed; the output directory is uploaded as an artifact on failure.
+- Not wired yet: `--mode nightly`, `--nodes 5` and `--read-consistency lease` runs, and a
+  weekly 24 h soak.
 
 ## Known limitations
 

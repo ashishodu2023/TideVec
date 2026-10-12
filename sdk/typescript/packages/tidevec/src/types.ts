@@ -54,8 +54,8 @@ export interface FilterObject {
  *
  * - a string is sent verbatim (`"key=value"`, understood by every server)
  * - a single-key equality object such as `{ doc_id: "refunds" }` is sent
- *   as `"doc_id=refunds"`, so it also works on 0.3.0 servers
- * - any other object is sent as a structured filter (servers with JSON filters)
+ *   as `"doc_id=refunds"`, so it also works on pre-0.3.0 servers
+ * - any other object is sent as a structured filter (0.3.0+ servers)
  */
 export type Filter = string | FilterObject;
 

@@ -63,6 +63,7 @@ checks for `404`.
     `Blend(0)` is the only way to ask for pure similarity). `Delete` takes `(ids, filter)` and returns
     the number removed.
 
-!!! info "Not in the Go SDK yet"
-    JSON filters, `as_of`, hybrid search, get-by-id, scroll and aliases are REST-only for now
-    ([details](../concepts/filters.md)).
+Retrieval and the other 0.3.0 APIs: `Get`, `GetMany`, `Scroll`, `ListIDs`, `CountWhere`,
+`DeleteWhere`, `SetAlias` / `DeleteAlias` / `ListAliases`, `Compact` / `CompactionStatus`;
+`SearchOptions` carries structured filters, `as_of` and hybrid text queries. See
+[Retrieval, filters, as-of and hybrid](../concepts/filters.md).

@@ -20,8 +20,8 @@ meta keys) are pushed down to the server as a pre-filter.
 Limitations:
     * ``filter_documents``, ``count_documents(filters)`` and the SKIP/FAIL
       duplicate policies need the retrieval-completeness REST API
-      (``/scroll`` and ``/get``); against 0.3.0 servers and embedded mode
-      they enumerate the collection, which only suits small collections.
+      (``/scroll`` and ``/get``, 0.3.0+); against older servers and native
+      modules they enumerate the collection, which only suits small collections.
     * Documents without an embedding are stored with a placeholder vector
       and never returned by embedding retrieval.
     * ``blob`` and ``sparse_embedding`` are not stored.

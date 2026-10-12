@@ -8,24 +8,33 @@ features.
 
 ## 1. Where TideVec stands
 
-**Works and is tested** (152 C++ tests, 40 Python, 4 Go, 8 Java; CI on every push):
+**Works and is tested** (217 C++ tests across 8 suites, 171 Python, 8 Go, 12 Java, 34 TypeScript,
+7 Python cluster tests and 11 linearizability-checker tests; CI on every push, with the Python
+cluster tests and a chaos run nightly):
 
-- HNSW index with recency blended into the search, per-query blend, `ef_search`, single-key payload
-  filters during traversal, tombstone compaction, optional PQ.
+- HNSW index with recency blended into the search, per-query blend, `ef_search`, optional PQ.
+- Retrieval: get-by-id, scroll, list ids and count; JSON filters (`$in`, ranges, dates,
+  `$and`/`$or`/`$not`) with payload indexes and a filter-aware planner; `as_of` point-in-time
+  queries; BM25 hybrid search; collection aliases; delete by ids or filter; background compaction.
 - Write-time **supersession** (version linking by key or similarity) and typed edges
   (`UPDATES`, `CONTRADICTS`, ...), mirrored across shards.
-- Delete by ids or filter; WAL with replay; disk segments; backups with S3/GCS upload and
-  point-in-time restore; auth, rate limits, multi-tenant keys and quotas; OTel traces.
-- Embedded Python mode (Linux x86_64/arm64, macOS arm64), LangChain and LlamaIndex stores,
-  `AgentMemory` + `tidevec-mcp` server, Go/Java/C++ REST clients.
+- WAL with replay; disk segments; backups with S3/GCS upload and point-in-time restore; auth, rate
+  limits, multi-tenant keys and quotas; OTel traces.
+- Embedded Python mode (Linux x86_64/arm64, macOS arm64; musllinux and macOS x86_64 wheels from the
+  0.3.0 release workflow), integrations for LangChain, LlamaIndex, Haystack, DSPy, LangGraph and
+  CrewAI, `AgentMemory` + `tidevec-mcp` server, Go/Java/C++ REST clients, TypeScript client with
+  Vercel AI SDK and n8n packages (not on npm yet), Helm chart.
 - DriftBridge model migration that preserves concurrent writes (same dimension, standalone only).
+- Published benchmarks: real-data temporal, temporal v2, LongMemEval agent memory, SIFT-1M/GloVe-100
+  ANN (where TideVec trails hnswlib and FAISS).
 
-**Experimental:** multi-process Raft cluster mode (full replicas, no snapshots or membership changes);
-GPU (CUDA, CAGRA-style) and TPU paths, never validated on hardware.
+**Experimental:** multi-process Raft cluster mode (full replicas; snapshots, membership changes,
+ReadIndex/lease reads and pre-vote; chaos-tested with a linearizability checker) and the multi-Raft
+`tidevec-router`. **Unsupported:** the GPU (CUDA, CAGRA-style) path, which fails recall on real
+hardware, and the TPU path.
 
-**Missing:** get-by-id/scroll, multi-key/range filters, payload indexes, hybrid (keyword) search,
-multi-host sharding, atomic DriftBridge swap, real gRPC (the `.proto` exists, no server), Windows,
-standard ANN benchmark numbers, a managed service.
+**Missing:** multi-host sharding in production form, atomic DriftBridge swap, real gRPC (the
+`.proto` exists, no server), Windows, packages on npm and Maven Central, a managed service.
 
 ---
 
@@ -37,7 +46,7 @@ General-purpose vector databases (Qdrant, Milvus, Weaviate, Pinecone) are far ah
 ecosystem; competing there head-on is not winnable. What none of them do is know that a document *was
 replaced*. TideVec's defensible claims, each backed by the real-data benchmark:
 
-1. Plain similarity returns outdated versions most of the time (55-86% on Wikipedia revisions).
+1. Plain similarity returns outdated versions most of the time (55–85% on Wikipedia revisions).
 2. Recency reranking fixes the top hit but leaves ~1 stale version in every top-5 context.
 3. Write-time supersession removes them, with no time window to tune.
 
@@ -70,6 +79,11 @@ Positioning to avoid: "fastest" or "most durable" anything until benchmarks supp
 
 ### Phase 1: Retrieval completeness (1-3 months, starts with Phase 0)
 
+**Status (0.3.0):** items 1-4, aliases and background compaction shipped in every SDK except C++;
+the atomic DriftBridge swap and WAL/segment compaction are open. Exit criteria: a nightly CI test
+asserts recall@10 ≥ 0.95 for 1% range, keyword, AND and `created_at` filters on 1M vectors; the BEIR
+hybrid comparison has not been run.
+
 Ordered by what integrations and users hit first:
 
 1. **Get-by-id, scroll, list ids** (REST, all SDKs, embedded). LangChain `get_by_ids` and LlamaIndex
@@ -96,6 +110,10 @@ Ordered by what integrations and users hit first:
 
 ### Phase 2: Benchmarks and validation (1-3 months, parallel with Phase 1)
 
+**Status (0.3.0):** ANN (SIFT-1M, GloVe-100 vs. hnswlib and FAISS), temporal v2 (reimplemented
+Qdrant/Milvus decay baselines, not live instances), LongMemEval agent memory (mem0/Zep and LoCoMo not
+yet) and the GPU run (result: unsupported) are published in `benchmarks/`; Cohere-1M is not.
+
 - **Standard ANN numbers** with VectorDBBench or ann-benchmarks (SIFT-1M, GloVe-100, Cohere-1M):
   recall vs. QPS, build time, memory, p99 latency. Publish them even where TideVec trails.
 - **Temporal benchmark v2:**
@@ -112,6 +130,11 @@ Ordered by what integrations and users hit first:
 claim in the README links to one of them.
 
 ### Phase 3: Distributed TideVec (3-6 months, after Phase 1 items 1-2)
+
+**Status (0.3.0):** snapshots/`InstallSnapshot`, single-server membership changes, ReadIndex and
+lease reads, pre-vote and the chaos harness with a linearizability checker (nightly CI) are done;
+multi-Raft exists only as the experimental `tidevec-router`. The 24-hour chaos run, replicated
+DriftBridge, cross-host erasure coding and the 100M-vector test are open.
 
 - **Raft hardening:**
   - log snapshots and `InstallSnapshot`
@@ -132,6 +155,10 @@ claim in the README links to one of them.
 - 100M vectors across 6 hosts, with published query latency.
 
 ### Phase 4: Ecosystem and distribution (continuous, from Phase 0)
+
+**Status (0.3.0):** in-repo Haystack, DSPy, LangGraph and CrewAI integrations, the TypeScript client,
+`@tidevec/ai-sdk` and the n8n node, MCP setups for more clients, a Helm chart, a Homebrew formula and
+musllinux/macOS x86_64 wheels exist; upstream listings and npm publishing are open.
 
 | Integration | Prerequisite | Notes |
 |---|---|---|

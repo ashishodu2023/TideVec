@@ -59,16 +59,24 @@ def _load_native():
     return tidevec_native
 
 
+class InvalidArgumentError(TideVecError, ValueError):
+    """The engine rejected an argument (the server answers these with 400)."""
+
+
 def _translate_errors(fn: _F) -> _F:
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
+        except TideVecError:
+            raise
         except RuntimeError as e:
             msg = str(e)
             if msg.startswith("Collection not found"):
                 raise CollectionNotFoundError(msg) from e
             raise TideVecError(msg) from e
+        except ValueError as e:
+            raise InvalidArgumentError(str(e)) from e
     return wrapper  # type: ignore[return-value]
 
 

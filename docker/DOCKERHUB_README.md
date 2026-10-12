@@ -97,8 +97,9 @@ Three or more containers can replicate writes with Raft over HTTP:
 ```
 
 The leader accepts writes; followers answer `421` with the leader's address (the SDKs follow it), and
-serve possibly slightly stale reads. Every node holds a full copy; there are no log snapshots or
-membership changes yet, and DriftBridge is disabled. Not for production.
+serve possibly slightly stale reads unless a request asks for `consistency=linearizable` or `lease`.
+Log snapshots, adding/removing nodes and pre-vote are implemented. Every node holds a full copy and
+DriftBridge is disabled. Experimental, not for production.
 
 ---
 
@@ -108,15 +109,15 @@ membership changes yet, and DriftBridge is disabled. Not for production.
 |---|---|---|
 | `latest`, `cpu` | amd64, arm64 | newest stable release, CPU server (recommended) |
 | `0.3.0`, `0.3.0-cpu`, `0.3`, `0.3-cpu` | amd64, arm64 | pinned release / latest patch of a minor release |
-| `gpu`, `0.3.0-gpu`, `0.3-gpu` | amd64 | CUDA 12 runtime, starts with `--device gpu` (fixed flags; only `TIDEVEC_API_KEY` from the table above applies, and it is required) |
-| `tpu`, `0.3.0-tpu`, `0.3-tpu` | amd64 | JAX/XLA base, starts with `--device tpu` (same note) |
+| `gpu`, `0.3.0-gpu`, `0.3-gpu` | amd64 | CUDA 12 runtime, `TIDEVEC_DEVICE=gpu`; same entrypoint and variables as the CPU image (unsupported, see below) |
+| `tpu`, `0.3.0-tpu`, `0.3-tpu` | amd64 | JAX/XLA base, `TIDEVEC_DEVICE=tpu`; same entrypoint and variables as the CPU image |
 | `main`, `sha-<commit>` (`-gpu`/`-tpu` suffixes for the accelerator images) | | builds of the main branch, not releases |
 
 Pre-releases (`0.4.0-rc1`) get their own version tags only and never move `latest`, `cpu` or `0.x`.
 
 The GPU path is an independent CUDA implementation of the CAGRA search design (Ootomo et al.,
-ICDE 2024), not NVIDIA cuVS. It has not been benchmarked or validated on GPU hardware in CI; use the
-CPU image unless you are testing it. On Apple Silicon use `latest`/`cpu`. The GPU/TPU tags are
+ICDE 2024), not NVIDIA cuVS. On real GPU hardware it fails recall (graph search recall@10 0.003), so it
+is unsupported; use the CPU image. On Apple Silicon use `latest`/`cpu`. The GPU/TPU tags are
 amd64-only (`no matching manifest for linux/arm64` means you pulled one of them).
 
 ---
@@ -133,7 +134,7 @@ amd64-only (`no matching manifest for linux/arm64` means you pulled one of them)
 - **Integrations:** LangChain, LlamaIndex, and an MCP memory server (`tidevec-mcp`) for Claude Desktop
   and Cursor.
 
-On 270 real Wikipedia revisions, plain cosine returned an outdated version for 55-85% of queries;
+On 270 real Wikipedia revisions, plain cosine returned an outdated version for 55–85% of queries;
 TideVec with supersession returned the current version and kept outdated versions out of the top 5.
 Recency weighting alone matched a recency rerank, no better. Details:
 [benchmarks/temporal_real_data](https://github.com/ashishodu2023/TideVec/tree/main/benchmarks/temporal_real_data).
