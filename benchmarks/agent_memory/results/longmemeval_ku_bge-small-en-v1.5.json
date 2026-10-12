@@ -1,0 +1,71 @@
+{
+  "dataset": "LongMemEval-S (cleaned), knowledge-update",
+  "model": "BAAI/bge-small-en-v1.5",
+  "n_questions": 72,
+  "k": 5,
+  "strategies": {
+    "vector store (cosine)": {
+      "current@1": 0.25,
+      "current@5": 0.7777777777777778,
+      "stale@1": 0.2777777777777778,
+      "stale_in_top5": 0.9305555555555556,
+      "stale_first": 0.5416666666666666,
+      "mrr": 0.4405092592592592,
+      "seconds": 0.1623063087463379
+    },
+    "recency rerank (cos top-50, blend 0.2, hl 30d)": {
+      "current@1": 0.3888888888888889,
+      "current@5": 0.8055555555555556,
+      "stale@1": 0.06944444444444445,
+      "stale_in_top5": 0.3055555555555556,
+      "stale_first": 0.1388888888888889,
+      "mrr": 0.5541666666666667,
+      "seconds": 0.16338086128234863
+    },
+    "AgentMemory (default: blend 0.2, supersede 0.95)": {
+      "current@1": 0.3888888888888889,
+      "current@5": 0.7361111111111112,
+      "stale@1": 0.041666666666666664,
+      "stale_in_top5": 0.20833333333333334,
+      "stale_first": 0.1111111111111111,
+      "mrr": 0.5287037037037037,
+      "seconds": 27.924166679382324
+    },
+    "AgentMemory (supersede 0.90)": {
+      "current@1": 0.2222222222222222,
+      "current@5": 0.2916666666666667,
+      "stale@1": 0.013888888888888888,
+      "stale_in_top5": 0.041666666666666664,
+      "stale_first": 0.013888888888888888,
+      "mrr": 0.25,
+      "seconds": 27.249041318893433
+    },
+    "AgentMemory (supersede 0.98)": {
+      "current@1": 0.3888888888888889,
+      "current@5": 0.7638888888888888,
+      "stale@1": 0.06944444444444445,
+      "stale_in_top5": 0.3055555555555556,
+      "stale_first": 0.1527777777777778,
+      "mrr": 0.5386574074074074,
+      "seconds": 27.293277740478516
+    },
+    "AgentMemory (blend 0, supersede 0.95)": {
+      "current@1": 0.2361111111111111,
+      "current@5": 0.7777777777777778,
+      "stale@1": 0.2361111111111111,
+      "stale_in_top5": 0.6944444444444444,
+      "stale_first": 0.4166666666666667,
+      "mrr": 0.43425925925925923,
+      "seconds": 26.86544895172119
+    },
+    "AgentMemory + oracle key (upper bound)": {
+      "current@1": 0.4027777777777778,
+      "current@5": 0.75,
+      "stale@1": 0.0,
+      "stale_in_top5": 0.0,
+      "stale_first": 0.0,
+      "mrr": 0.5453703703703704,
+      "seconds": 26.94520878791809
+    }
+  }
+}

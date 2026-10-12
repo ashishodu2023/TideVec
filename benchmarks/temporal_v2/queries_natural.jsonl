@@ -1,0 +1,191 @@
+{"corpus": "wiki", "title": "OpenAI", "query": "who runs openai and is it still a nonprofit"}
+{"corpus": "wiki", "title": "OpenAI", "query": "company that makes chatgpt"}
+{"corpus": "wiki", "title": "Twitter", "query": "who owns twitter now"}
+{"corpus": "wiki", "title": "Twitter", "query": "why is twitter called X"}
+{"corpus": "wiki", "title": "Meta Platforms", "query": "facebook parent company name change"}
+{"corpus": "wiki", "title": "Tesla, Inc.", "query": "how many cars does tesla sell a year"}
+{"corpus": "wiki", "title": "Nvidia", "query": "nvidia market cap ai chips"}
+{"corpus": "wiki", "title": "Nvidia", "query": "most valuable chip company"}
+{"corpus": "wiki", "title": "Netflix", "query": "how many subscribers does netflix have"}
+{"corpus": "wiki", "title": "TikTok", "query": "is tiktok banned in the us"}
+{"corpus": "wiki", "title": "SpaceX", "query": "spacex starship and starlink overview"}
+{"corpus": "wiki", "title": "Microsoft", "query": "who is the ceo of microsoft"}
+{"corpus": "wiki", "title": "Apple Inc.", "query": "apple biggest company by revenue products"}
+{"corpus": "wiki", "title": "Amazon (company)", "query": "amazon ecommerce and aws business"}
+{"corpus": "wiki", "title": "Alphabet Inc.", "query": "google holding company"}
+{"corpus": "wiki", "title": "Intel", "query": "intel foundry troubles and ceo"}
+{"corpus": "wiki", "title": "Samsung Electronics", "query": "samsung smartphone and memory chip maker"}
+{"corpus": "wiki", "title": "Uber", "query": "uber ride hailing company profitable"}
+{"corpus": "wiki", "title": "Spotify", "query": "how many people use spotify"}
+{"corpus": "wiki", "title": "Zoom Video Communications", "query": "zoom video calls company after the pandemic"}
+{"corpus": "wiki", "title": "Reddit", "query": "is reddit a public company"}
+{"corpus": "wiki", "title": "Python (programming language)", "query": "latest python version and what is python used for"}
+{"corpus": "wiki", "title": "Python (programming language)", "query": "is python the most popular programming language"}
+{"corpus": "wiki", "title": "Rust (programming language)", "query": "rust language memory safety in the linux kernel"}
+{"corpus": "wiki", "title": "Linux kernel", "query": "who maintains the linux kernel and what languages is it written in"}
+{"corpus": "wiki", "title": "Kubernetes", "query": "container orchestration system from google"}
+{"corpus": "wiki", "title": "Android (operating system)", "query": "most used mobile os"}
+{"corpus": "wiki", "title": "MacOS", "query": "current version of macos"}
+{"corpus": "wiki", "title": "Microsoft Windows", "query": "latest version of windows"}
+{"corpus": "wiki", "title": "Firefox", "query": "firefox browser market share"}
+{"corpus": "wiki", "title": "Google Chrome", "query": "most popular web browser"}
+{"corpus": "wiki", "title": "Java (programming language)", "query": "java language owned by oracle"}
+{"corpus": "wiki", "title": "TypeScript", "query": "typed superset of javascript"}
+{"corpus": "wiki", "title": "PostgreSQL", "query": "open source relational database postgres features"}
+{"corpus": "wiki", "title": "Artemis program", "query": "when will nasa return humans to the moon"}
+{"corpus": "wiki", "title": "James Webb Space Telescope", "query": "jwst launch and first images"}
+{"corpus": "wiki", "title": "International Space Station", "query": "when will the iss be retired"}
+{"corpus": "wiki", "title": "Mars 2020", "query": "perseverance rover and ingenuity helicopter"}
+{"corpus": "wiki", "title": "Large Hadron Collider", "query": "biggest particle accelerator run status"}
+{"corpus": "wiki", "title": "CRISPR gene editing", "query": "first approved crispr therapy"}
+{"corpus": "wiki", "title": "Moderna", "query": "mrna vaccine company covid"}
+{"corpus": "wiki", "title": "Bitcoin", "query": "bitcoin etf and legal tender countries"}
+{"corpus": "wiki", "title": "Ethereum", "query": "ethereum proof of stake switch"}
+{"corpus": "wiki", "title": "Euro", "query": "how many countries use the euro"}
+{"corpus": "wiki", "title": "World population", "query": "how many people are on earth"}
+{"corpus": "wiki", "title": "Brexit", "query": "when did the uk leave the eu"}
+{"corpus": "wiki", "title": "European Union", "query": "how many member states does the eu have"}
+{"corpus": "wiki", "title": "United Nations", "query": "un secretary general and number of members"}
+{"corpus": "wiki", "title": "Burj Khalifa", "query": "tallest building in the world"}
+{"corpus": "wiki", "title": "Tokyo", "query": "population of tokyo metropolitan area"}
+{"corpus": "wiki", "title": "Singapore", "query": "singapore prime minister and economy"}
+{"corpus": "wiki", "title": "Nairobi", "query": "capital of kenya city facts"}
+{"corpus": "wiki", "title": "Iceland", "query": "iceland volcano eruptions population"}
+{"corpus": "wiki", "title": "FIFA World Cup", "query": "who won the last world cup"}
+{"corpus": "wiki", "title": "FIFA World Cup", "query": "how many teams play in the world cup"}
+{"corpus": "wiki", "title": "Summer Olympic Games", "query": "where are the next summer olympics"}
+{"corpus": "wiki", "title": "Formula One", "query": "f1 season calendar and teams"}
+{"corpus": "wiki", "title": "Wimbledon Championships", "query": "oldest tennis tournament grass"}
+{"corpus": "wiki", "title": "Marvel Cinematic Universe", "query": "highest grossing film franchise marvel"}
+{"corpus": "wiki", "title": "Taylor Swift", "query": "taylor swift eras tour records"}
+{"corpus": "wiki", "title": "United States", "query": "us population and gdp"}
+{"corpus": "wiki", "title": "China", "query": "most populous country china or india"}
+{"corpus": "wiki", "title": "India", "query": "india population largest democracy"}
+{"corpus": "wiki", "title": "Russia", "query": "russia invasion of ukraine sanctions"}
+{"corpus": "wiki", "title": "Ukraine", "query": "war in ukraine overview"}
+{"corpus": "wiki", "title": "United Kingdom", "query": "uk countries and monarch"}
+{"corpus": "wiki", "title": "Germany", "query": "germany economy and chancellor"}
+{"corpus": "wiki", "title": "France", "query": "france president and population"}
+{"corpus": "wiki", "title": "Japan", "query": "japan population decline"}
+{"corpus": "wiki", "title": "Brazil", "query": "largest country in south america"}
+{"corpus": "wiki", "title": "Climate change", "query": "how much has the earth warmed"}
+{"corpus": "wiki", "title": "Internet", "query": "how many people use the internet"}
+{"corpus": "wiki", "title": "Artificial intelligence", "query": "what is generative ai and large language models"}
+{"corpus": "wiki", "title": "Smartphone", "query": "how many smartphones are there"}
+{"corpus": "wiki", "title": "Electric vehicle", "query": "ev sales share worldwide"}
+{"corpus": "wiki", "title": "Solar power", "query": "solar energy share of electricity"}
+{"corpus": "wiki", "title": "Nuclear power", "query": "how many nuclear reactors are operating"}
+{"corpus": "wiki", "title": "COVID-19 pandemic", "query": "covid deaths worldwide total"}
+{"corpus": "wiki", "title": "COVID-19", "query": "covid symptoms and vaccines"}
+{"corpus": "wiki", "title": "Elon Musk", "query": "richest person in the world"}
+{"corpus": "wiki", "title": "Donald Trump", "query": "trump presidency"}
+{"corpus": "wiki", "title": "Joe Biden", "query": "biden presidency"}
+{"corpus": "wiki", "title": "Elizabeth II", "query": "queen of the united kingdom"}
+{"corpus": "wiki", "title": "Charles III", "query": "king of the united kingdom"}
+{"corpus": "wiki", "title": "Pope Francis", "query": "who is the current pope"}
+{"corpus": "wiki", "title": "Africa", "query": "population of africa"}
+{"corpus": "wiki", "title": "Earth", "query": "age of the earth and population"}
+{"corpus": "wiki", "title": "Moon", "query": "missions that landed on the moon recently"}
+{"corpus": "wiki", "title": "Mars", "query": "rovers exploring mars"}
+{"corpus": "wiki", "title": "Computer", "query": "what is a computer"}
+{"corpus": "wiki", "title": "Wikipedia", "query": "how many articles does wikipedia have"}
+{"corpus": "wiki", "title": "Google Search", "query": "google search engine ai overviews"}
+{"corpus": "wiki", "title": "Facebook", "query": "how many people use facebook"}
+{"corpus": "wiki", "title": "YouTube", "query": "biggest video platform users"}
+{"corpus": "wiki", "title": "World Wide Web", "query": "who invented the web"}
+{"corpus": "wiki", "title": "Television", "query": "streaming vs traditional tv"}
+{"corpus": "wiki", "title": "Vaccine", "query": "how vaccines work mrna"}
+{"corpus": "wiki", "title": "Cancer", "query": "cancer deaths per year"}
+{"corpus": "wiki", "title": "HIV/AIDS", "query": "how many people live with hiv"}
+{"corpus": "wiki", "title": "Malaria", "query": "malaria vaccine approved"}
+{"corpus": "wiki", "title": "New York City", "query": "nyc population and mayor"}
+{"corpus": "wiki", "title": "London", "query": "london population"}
+{"corpus": "wiki", "title": "Beijing", "query": "capital of china"}
+{"corpus": "wiki", "title": "Mumbai", "query": "financial capital of india"}
+{"corpus": "policy", "title": "Wikipedia:Verifiability", "query": "do I need a source for everything I add to wikipedia"}
+{"corpus": "policy", "title": "Wikipedia:Reliable sources", "query": "can I cite a blog or a tweet as a source"}
+{"corpus": "policy", "title": "Wikipedia:No original research", "query": "can I add my own analysis to an article"}
+{"corpus": "policy", "title": "Wikipedia:Neutral point of view", "query": "how should articles handle different viewpoints"}
+{"corpus": "policy", "title": "Wikipedia:Biographies of living persons", "query": "rules for writing about living people"}
+{"corpus": "policy", "title": "Wikipedia:Conflict of interest", "query": "can I edit the article about my own company"}
+{"corpus": "policy", "title": "Wikipedia:Paid-contribution disclosure", "query": "do paid editors have to disclose who pays them"}
+{"corpus": "policy", "title": "Wikipedia:Notability", "query": "what topics are allowed to have an article"}
+{"corpus": "policy", "title": "Wikipedia:Copyrights", "query": "what license is wikipedia text under"}
+{"corpus": "policy", "title": "Wikipedia:Non-free content", "query": "when can I upload copyrighted images"}
+{"corpus": "policy", "title": "Wikipedia:Blocking policy", "query": "why would an editor get blocked"}
+{"corpus": "policy", "title": "Wikipedia:Banning policy", "query": "difference between a ban and a block"}
+{"corpus": "policy", "title": "Wikipedia:Edit warring", "query": "what is the three revert rule"}
+{"corpus": "policy", "title": "Wikipedia:Civility", "query": "rules about being polite to other editors"}
+{"corpus": "policy", "title": "Wikipedia:No personal attacks", "query": "can I insult another editor"}
+{"corpus": "policy", "title": "Wikipedia:Harassment", "query": "what counts as harassment or outing"}
+{"corpus": "policy", "title": "Wikipedia:Sock puppetry", "query": "is it allowed to use multiple accounts"}
+{"corpus": "policy", "title": "Wikipedia:Username policy", "query": "what usernames are not allowed"}
+{"corpus": "policy", "title": "Wikipedia:Deletion policy", "query": "how do articles get deleted"}
+{"corpus": "policy", "title": "Wikipedia:Criteria for speedy deletion", "query": "which pages can be deleted without discussion"}
+{"corpus": "policy", "title": "Wikipedia:Consensus", "query": "how are decisions made among editors"}
+{"corpus": "policy", "title": "Wikipedia:Ignore all rules", "query": "can I ignore a rule that prevents improving wikipedia"}
+{"corpus": "policy", "title": "Wikipedia:Administrators", "query": "what can admins do and how are they chosen"}
+{"corpus": "policy", "title": "Wikipedia:Bot policy", "query": "rules for running automated editing bots"}
+{"corpus": "policy", "title": "Wikipedia:Protection policy", "query": "why are some pages locked from editing"}
+{"corpus": "policy", "title": "Wikipedia:Article titles", "query": "how should an article be named"}
+{"corpus": "policy", "title": "Wikipedia:Manual of Style", "query": "style guide for writing articles"}
+{"corpus": "policy", "title": "Wikipedia:Citing sources", "query": "how do I format citations and references"}
+{"corpus": "policy", "title": "Wikipedia:External links", "query": "which external links can be added"}
+{"corpus": "policy", "title": "Wikipedia:Image use policy", "query": "rules for adding photos to articles"}
+{"corpus": "policy", "title": "Wikipedia:Disruptive editing", "query": "what is disruptive editing"}
+{"corpus": "policy", "title": "Wikipedia:Assume good faith", "query": "should I assume other editors mean well"}
+{"corpus": "policy", "title": "Wikipedia:Dispute resolution", "query": "how to resolve a content dispute"}
+{"corpus": "policy", "title": "Wikipedia:Large language models", "query": "can I use chatgpt to write wikipedia articles"}
+{"corpus": "policy", "title": "Wikipedia:What Wikipedia is not", "query": "things wikipedia is not for like advertising"}
+{"corpus": "policy", "title": "Wikipedia:Libel", "query": "defamation rules"}
+{"corpus": "policy", "title": "Wikipedia:Child protection", "query": "policy on protecting minors"}
+{"corpus": "policy", "title": "Wikipedia:Canvassing", "query": "can I ask friends to vote in a discussion"}
+{"corpus": "docs", "title": "requests", "query": "simple http library for python"}
+{"corpus": "docs", "title": "numpy", "query": "n-dimensional array package install"}
+{"corpus": "docs", "title": "pandas", "query": "dataframe library main features"}
+{"corpus": "docs", "title": "scipy", "query": "scientific computing library optimization and linear algebra"}
+{"corpus": "docs", "title": "matplotlib", "query": "plotting library for python charts"}
+{"corpus": "docs", "title": "scikit-learn", "query": "machine learning library python install requirements"}
+{"corpus": "docs", "title": "django", "query": "batteries included web framework"}
+{"corpus": "docs", "title": "flask", "query": "lightweight wsgi web framework example"}
+{"corpus": "docs", "title": "fastapi", "query": "fast api framework with type hints"}
+{"corpus": "docs", "title": "pydantic", "query": "data validation using python type hints"}
+{"corpus": "docs", "title": "sqlalchemy", "query": "python sql toolkit and orm"}
+{"corpus": "docs", "title": "celery", "query": "distributed task queue"}
+{"corpus": "docs", "title": "pytest", "query": "testing framework simple asserts"}
+{"corpus": "docs", "title": "black", "query": "uncompromising code formatter"}
+{"corpus": "docs", "title": "ruff", "query": "extremely fast python linter written in rust"}
+{"corpus": "docs", "title": "mypy", "query": "static type checker for python"}
+{"corpus": "docs", "title": "poetry", "query": "python dependency management and packaging tool"}
+{"corpus": "docs", "title": "pip", "query": "package installer for python"}
+{"corpus": "docs", "title": "boto3", "query": "aws sdk for python"}
+{"corpus": "docs", "title": "httpx", "query": "async http client with http/2"}
+{"corpus": "docs", "title": "aiohttp", "query": "async http client server asyncio"}
+{"corpus": "docs", "title": "click", "query": "command line interface creation kit"}
+{"corpus": "docs", "title": "rich", "query": "rich text and beautiful formatting in the terminal"}
+{"corpus": "docs", "title": "tqdm", "query": "progress bar for loops"}
+{"corpus": "docs", "title": "cryptography", "query": "cryptographic recipes and primitives"}
+{"corpus": "docs", "title": "pillow", "query": "python imaging library fork"}
+{"corpus": "docs", "title": "torch", "query": "tensors and dynamic neural networks with gpu acceleration"}
+{"corpus": "docs", "title": "tensorflow", "query": "open source machine learning framework from google"}
+{"corpus": "docs", "title": "transformers", "query": "pretrained models for text vision audio"}
+{"corpus": "docs", "title": "langchain", "query": "framework for building llm applications"}
+{"corpus": "docs", "title": "openai", "query": "official python library for the openai api"}
+{"corpus": "docs", "title": "spacy", "query": "industrial strength natural language processing"}
+{"corpus": "docs", "title": "xgboost", "query": "gradient boosting library"}
+{"corpus": "docs", "title": "streamlit", "query": "build data apps in python quickly"}
+{"corpus": "docs", "title": "jupyterlab", "query": "next generation notebook interface"}
+{"corpus": "docs", "title": "uvicorn", "query": "asgi web server implementation"}
+{"corpus": "docs", "title": "polars", "query": "fast dataframe library written in rust"}
+{"corpus": "docs", "title": "duckdb", "query": "in-process analytical sql database"}
+{"corpus": "docs", "title": "pyarrow", "query": "apache arrow python bindings"}
+{"corpus": "docs", "title": "ray", "query": "framework for scaling ai and python applications"}
+{"corpus": "docs", "title": "networkx", "query": "graph and network analysis library"}
+{"corpus": "docs", "title": "beautifulsoup4", "query": "screen scraping html parsing library"}
+{"corpus": "docs", "title": "selenium", "query": "browser automation python bindings"}
+{"corpus": "docs", "title": "playwright", "query": "automate chromium firefox and webkit"}
+{"corpus": "docs", "title": "sentry-sdk", "query": "error monitoring sdk"}
+{"corpus": "docs", "title": "loguru", "query": "python logging made simple"}
+{"corpus": "docs", "title": "python-dotenv", "query": "read key value pairs from a .env file"}
+{"corpus": "docs", "title": "orjson", "query": "fast correct json library"}
+{"corpus": "docs", "title": "alembic", "query": "database migration tool for sqlalchemy"}

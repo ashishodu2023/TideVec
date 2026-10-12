@@ -1,0 +1,4 @@
+fad92c3e0b4cfa5af14c8908bfe7229218de62ba
+c5bbc1be8fff216fbf86596c5fed610db543a239  include/tidevec/index/tv_index.hpp
+c158cb0dcb53235c2e7c6006a9a21c60127f3a73  include/tidevec/cluster/durable_collection.hpp
+991b5778e5ee61137df0a44cea99b3eda5c54951  sdk/python/tidevec/memory.py

@@ -1,5 +1,10 @@
 # TideVec vs Qdrant — Temporal Ranking Benchmark
 
+> **Synthetic.** Policy-document cosines are hand-set to reproduce one failure mode, and the "Qdrant"
+> rows model a plain cosine search or a timestamp filter. Qdrant also offers decay-based score boosting,
+> which this benchmark does not use. For results on real data, see
+> [`../temporal_real_data`](../temporal_real_data).
+
 Reproducible answer to: **"How does TideVec compare to Qdrant with a timestamp metadata filter?"**
 
 ## Quick run

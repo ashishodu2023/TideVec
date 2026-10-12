@@ -1,0 +1,1 @@
+{"engine": "faiss", "n": 1183514, "d": 100, "nq": 10000, "metric": "cosine", "M": 16, "ef_construction": 200, "build_threads": 16, "build_s": 46.23612372400021, "index_rss_mb": 662.953125, "peak_rss_mb": 1171.34375, "runs": []}

@@ -1,0 +1,1 @@
+{"engine":"brute","n":1183514,"d":100,"nq":10000,"runs":[{"batch":256,"recall":0.99452,"qps":5666.82}],"build_s":0.341428,"gpu":"NVIDIA GeForce RTX 4060 Ti"}
