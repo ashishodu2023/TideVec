@@ -1,0 +1,535 @@
+# ================================================================
+# Release: runs on a `v*` tag (e.g. v0.3.0).
+#
+#   1. checks every version string equals the tag
+#   2. runs the full CI suite (ci.yml) as a gate
+#   3. builds tidevec (pure Python) and tidevec-embedded (cibuildwheel:
+#      manylinux x86_64/aarch64, macOS arm64, CPython 3.9-3.13 + sdist)
+#   4. installs `tidevec[embedded]` from those artifacts on Linux x86_64,
+#      Linux arm64 and macOS arm64 and runs examples/01_quickstart_embedded.py
+#   5. builds the CPU image per arch, runs the README snippet against it,
+#      then pushes a multi-arch manifest; builds the GPU/TPU images
+#   6. publishes to PyPI, Docker Hub, GitHub Packages (Java) and a GitHub
+#      Release, and tags the Go module (sdk/go/vX.Y.Z)
+#
+# Publishing steps run only on a tag push. `workflow_dispatch` runs steps
+# 1-5 as a dry run (optionally uploading to TestPyPI).
+#
+# Secrets / settings (see docs/operations/releasing.md):
+#   PyPI           trusted publishing (environment `pypi`, recommended) or
+#                  secret PYPI_API_TOKEN; TestPyPI: TEST_PYPI_API_TOKEN
+#   Docker Hub     secrets DOCKER_USERNAME, DOCKER_PASSWORD (access token)
+#   Go module tag  repository variable CREATE_GO_TAG=true to push the tag
+#   Maven Central  repository variable MAVEN_CENTRAL_ENABLED=true plus
+#                  secrets OSSRH_USERNAME, OSSRH_TOKEN, GPG_PRIVATE_KEY,
+#                  GPG_PASSPHRASE (not set up yet)
+# ================================================================
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      testpypi:
+        description: Upload the Python dists to TestPyPI (dry run otherwise)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOCKERHUB_REPO: averm004/tidevec
+  IS_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+
+  # ── 1. Version consistency ──────────────────────────────────────
+  versions:
+    name: Version check
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - id: v
+        name: Resolve version
+        run: |
+          if [ "$IS_TAG" = "true" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            python scripts/check_release_versions.py --tag "$GITHUB_REF_NAME"
+          else
+            python scripts/check_release_versions.py
+            VERSION=$(python -c "import re;print(re.search(r'TIDEVEC_SERVER_VERSION \"([^\"]+)\"',open('include/tidevec/api/rest_server.hpp').read()).group(1))")
+          fi
+          case "$VERSION" in *-*|*a*|*b*|*rc*) PRE=true ;; *) PRE=false ;; esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRE" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION (prerelease: $PRE)"
+      - name: CHANGELOG has an entry for this version
+        run: grep -q "^## \[${{ steps.v.outputs.version }}\]" CHANGELOG.md
+
+  # ── 2. Full test suite as a gate ────────────────────────────────
+  ci:
+    name: CI
+    needs: [versions]
+    uses: ./.github/workflows/ci.yml
+    with:
+      skip_wheels: true
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+
+  # ── 3a. tidevec (pure Python) ───────────────────────────────────
+  dist-python:
+    name: Build tidevec
+    needs: [versions]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Build sdist + wheel
+        run: |
+          pip install build twine
+          python -m build sdk/python --outdir dist-python
+          twine check --strict dist-python/*
+          ls -lh dist-python
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-tidevec
+          path: dist-python/*
+          if-no-files-found: error
+
+  # ── 3b. tidevec-embedded wheels ─────────────────────────────────
+  wheels-embedded:
+    name: Wheels (${{ matrix.os }})
+    needs: [versions]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vendor headers into the package
+        run: ./scripts/sync_embedded_headers.sh
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.22
+        with:
+          package-dir: sdk/python-embedded
+          output-dir: wheelhouse
+        env:
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
+          CIBW_SKIP: "*-musllinux_* *-manylinux_i686"
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=13.3
+          CIBW_BEFORE_TEST: pip install {project}/sdk/python
+          CIBW_TEST_COMMAND: >-
+            python {project}/scripts/release_smoke_test.py --embedded
+            --expect-version ${{ needs.versions.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-embedded-${{ matrix.os }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  sdist-embedded:
+    name: Embedded sdist
+    needs: [versions]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Build sdist (headers vendored)
+        run: |
+          ./scripts/sync_embedded_headers.sh
+          pip install build twine
+          python -m build --sdist sdk/python-embedded --outdir dist-embedded
+          twine check --strict dist-embedded/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-embedded-sdist
+          path: dist-embedded/*.tar.gz
+          if-no-files-found: error
+
+  # ── 4. Phase 0 exit check: clean install + quickstart ───────────
+  install-check:
+    name: Install check (${{ matrix.os }}, py${{ matrix.python }})
+    needs: [versions, dist-python, wheels-embedded]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04-arm, macos-14]
+        python: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            examples
+            scripts
+      - uses: actions/setup-python@v5
+        with: { python-version: '${{ matrix.python }}' }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: pip install "tidevec[embedded]" and run the quickstart
+        run: |
+          START=$(date +%s)
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install --only-binary tidevec-embedded \
+            --find-links dist "tidevec[embedded]==${{ needs.versions.outputs.version }}"
+          cd "$RUNNER_TEMP"
+          /tmp/venv/bin/python "$GITHUB_WORKSPACE/examples/01_quickstart_embedded.py"
+          /tmp/venv/bin/python "$GITHUB_WORKSPACE/scripts/release_smoke_test.py" --embedded \
+            --expect-version "${{ needs.versions.outputs.version }}"
+          echo "install + quickstart took $(( $(date +%s) - START ))s"
+
+  # ── 5a. CPU image: build per arch, smoke test, push by digest ───
+  docker-cpu:
+    name: Docker CPU (${{ matrix.platform }})
+    needs: [versions]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/cpu/Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: tidevec:smoke
+          build-args: |
+            VERSION=${{ needs.versions.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=release-cpu-${{ matrix.platform }}
+          cache-to: type=gha,scope=release-cpu-${{ matrix.platform }},mode=max
+
+      - name: README snippet against the container
+        env:
+          TIDEVEC_API_KEY: smoke-test-key
+        run: |
+          test "$(docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' tidevec:smoke)" \
+            = "${{ needs.versions.outputs.version }}"
+          docker run -d --name tv -p 6399:6399 -e TIDEVEC_API_KEY tidevec:smoke
+          pip install ./sdk/python
+          python scripts/release_smoke_test.py --server localhost:6399 \
+            --expect-version "${{ needs.versions.outputs.version }}" \
+            || { docker logs tv; exit 1; }
+          docker rm -f tv
+
+      - name: Login to Docker Hub
+        if: env.IS_TAG == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Push by digest
+        id: push
+        if: env.IS_TAG == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/cpu/Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.DOCKERHUB_REPO }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            VERSION=${{ needs.versions.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=release-cpu-${{ matrix.platform }}
+
+      - name: Export digest
+        if: env.IS_TAG == 'true'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v4
+        if: env.IS_TAG == 'true'
+        with:
+          name: digest-cpu-${{ matrix.runner }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+
+  docker-cpu-manifest:
+    name: Docker CPU manifest
+    needs: [versions, ci, install-check, docker-cpu]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: dockerhub
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-cpu-*
+          path: /tmp/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Create multi-arch tags
+        working-directory: /tmp/digests
+        env:
+          VERSION: ${{ needs.versions.outputs.version }}
+          PRERELEASE: ${{ needs.versions.outputs.prerelease }}
+        run: |
+          MINOR="${VERSION%.*}"
+          tags=(-t "$DOCKERHUB_REPO:$VERSION" -t "$DOCKERHUB_REPO:$VERSION-cpu")
+          if [ "$PRERELEASE" != "true" ]; then
+            tags+=(-t "$DOCKERHUB_REPO:$MINOR" -t "$DOCKERHUB_REPO:$MINOR-cpu")
+            tags+=(-t "$DOCKERHUB_REPO:latest" -t "$DOCKERHUB_REPO:cpu")
+          fi
+          refs=()
+          for d in *; do refs+=("$DOCKERHUB_REPO@sha256:$d"); done
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+          docker buildx imagetools inspect "$DOCKERHUB_REPO:$VERSION"
+
+  # ── 5b. GPU / TPU images (amd64, unvalidated on hardware) ───────
+  docker-accel:
+    name: Docker ${{ matrix.variant }}
+    needs: [versions, ci, install-check, docker-cpu]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: dockerhub
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [gpu, tpu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Tags
+        id: tags
+        env:
+          VERSION: ${{ needs.versions.outputs.version }}
+          PRERELEASE: ${{ needs.versions.outputs.prerelease }}
+          V: ${{ matrix.variant }}
+        run: |
+          TAGS="$DOCKERHUB_REPO:$VERSION-$V"
+          if [ "$PRERELEASE" != "true" ]; then
+            TAGS="$TAGS,$DOCKERHUB_REPO:${VERSION%.*}-$V,$DOCKERHUB_REPO:$V"
+          fi
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/${{ matrix.variant }}/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.versions.outputs.version }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,scope=${{ matrix.variant }},mode=max
+
+  # ── 6a. PyPI ────────────────────────────────────────────────────
+  # tidevec-embedded goes first: tidevec[embedded] depends on it.
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [versions, ci, install-check, sdist-embedded, docker-cpu]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/tidevec/
+    permissions:
+      id-token: write   # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-embedded-*
+          path: dist-embedded
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-tidevec
+          path: dist-tidevec
+      - name: Publish tidevec-embedded
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-embedded/
+          # Empty secret -> trusted publishing via OIDC.
+          password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Publish tidevec
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-tidevec/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+  publish-testpypi:
+    name: Publish to TestPyPI (dry run)
+    needs: [versions, install-check, sdist-embedded]
+    if: github.event_name == 'workflow_dispatch' && inputs.testpypi
+    runs-on: ubuntu-24.04
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          skip-existing: true
+
+  # ── 6b. Go module tag ───────────────────────────────────────────
+  # Go resolves sdk/go/vX.Y.Z tags for the nested module; the v* tag alone
+  # is not enough. Set the repository variable CREATE_GO_TAG=true to have
+  # this job push it, or run:
+  #   git tag sdk/go/vX.Y.Z vX.Y.Z && git push origin sdk/go/vX.Y.Z
+  go-module:
+    name: Go module tag
+    needs: [versions, ci]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GO_TAG: sdk/go/${{ github.ref_name }}
+      MODULE: github.com/ashishodu2023/TideVec/sdk/go
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push sdk/go tag
+        if: vars.CREATE_GO_TAG == 'true'
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$GO_TAG" >/dev/null; then
+            echo "$GO_TAG already exists"
+          else
+            git tag "$GO_TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$GO_TAG"
+          fi
+      - name: Warm the module proxy
+        if: vars.CREATE_GO_TAG == 'true'
+        run: |
+          sleep 10
+          curl -sf "https://proxy.golang.org/$MODULE/@v/${GITHUB_REF_NAME}.info" || \
+            echo "proxy has not indexed $GO_TAG yet; it will on first 'go get'"
+      - name: Summary
+        run: |
+          {
+            echo "### Go module"
+            if [ "${{ vars.CREATE_GO_TAG }}" = "true" ]; then
+              echo "Tagged \`$GO_TAG\`. Install: \`go get $MODULE@$GITHUB_REF_NAME\`"
+            else
+              echo "Push the module tag manually:"
+              echo '```'
+              echo "git tag $GO_TAG $GITHUB_REF_NAME && git push origin $GO_TAG"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── 6c. Java: GitHub Packages now, Maven Central once set up ────
+  java:
+    name: Java package
+    needs: [versions, ci]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          server-id: github
+          settings-path: ${{ github.workspace }}
+      - name: Deploy to GitHub Packages
+        working-directory: sdk/java
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: mvn -B deploy -DskipTests --no-transfer-progress -s "$GITHUB_WORKSPACE/settings.xml"
+      - name: Maven Central (needs a Sonatype account and signing key)
+        if: vars.MAVEN_CENTRAL_ENABLED == 'true'
+        run: |
+          echo "TODO: add the central-publishing-maven-plugin and maven-gpg-plugin"
+          echo "to sdk/java/pom.xml, import GPG_PRIVATE_KEY, then run:"
+          echo "  mvn -B deploy -P release"
+          exit 1
+
+  # ── 6d. GitHub Release with notes from CHANGELOG.md ─────────────
+  github-release:
+    name: GitHub Release
+    needs: [versions, publish-pypi, docker-cpu-manifest]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: assets
+          merge-multiple: true
+      - name: C++ SDK archive
+        run: |
+          D="tidevec-cpp-sdk-$GITHUB_REF_NAME"
+          mkdir -p "$D"
+          cp -r sdk/cpp/include sdk/cpp/cmake sdk/cpp/CMakeLists.txt \
+                sdk/cpp/conanfile.py sdk/cpp/vcpkg.json "$D/"
+          tar -czf "assets/$D.tar.gz" "$D"
+      - name: Release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ needs.versions.outputs.version }}
+        run: |
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRERELEASE: ${{ needs.versions.outputs.prerelease }}
+        run: |
+          FLAGS=""
+          [ "$PRERELEASE" = "true" ] && FLAGS="--prerelease"
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --title "TideVec $GITHUB_REF_NAME" --notes-file notes.md --verify-tag $FLAGS

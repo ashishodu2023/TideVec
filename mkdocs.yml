@@ -1,0 +1,93 @@
+site_name: TideVec
+site_description: Vector database for RAG and AI agents over knowledge that changes
+# TODO(release): set to the docs domain once chosen (e.g. https://docs.tidevec.com/).
+site_url: https://ashishodu2023.github.io/TideVec/
+repo_url: https://github.com/ashishodu2023/TideVec
+repo_name: ashishodu2023/TideVec
+edit_uri: edit/main/docs/
+copyright: Apache-2.0
+
+docs_dir: docs
+site_dir: site
+strict: true
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+extra_javascript:
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+not_in_nav: |
+  /images/*
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+      - Recency and half-life: concepts/recency.md
+      - Supersession: concepts/supersession.md
+      - Edges and contradictions: concepts/edges.md
+      - Staleness signals: concepts/staleness.md
+      - Filters, as-of and hybrid search: concepts/filters.md
+  - REST API reference: api/rest.md
+  - SDKs:
+      - Python: sdks/python.md
+      - Go: sdks/go.md
+      - Java: sdks/java.md
+      - TypeScript: sdks/typescript.md
+      - C++: sdks/cpp.md
+  - Integrations:
+      - LangChain: integrations/langchain.md
+      - LlamaIndex: integrations/llamaindex.md
+      - Agent memory and MCP: integrations/mcp.md
+  - Operations:
+      - Deployment: operations/deployment.md
+      - Auth, tenants and limits: operations/auth.md
+      - Durability: operations/durability.md
+      - Backups and restore: operations/backups.md
+      - Observability: operations/observability.md
+      - Cluster mode (experimental): operations/cluster.md
+      - Releasing: operations/releasing.md
+  - Benchmarks: benchmarks.md
+  - Examples: examples.md
+  - Changelog: changelog.md

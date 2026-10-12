@@ -2,1028 +2,543 @@
 
 # TideVec
 
-**The world's first temporally-aware, causally-indexed vector database**
+**Your RAG keeps quoting last month's policy. TideVec fixes that.**
 
-*C++20 · GPU/TPU ready · Temporal decay · Apache 2.0*
+*A vector database for AI agents and RAG over knowledge that changes:
+time-aware ranking, automatic detection of superseded versions, and typed
+links between facts, in a C++20 engine you can embed in Python or run as a server.*
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-127%2F127-brightgreen)](tests/)
+[![CI](https://github.com/ashishodu2023/TideVec/actions/workflows/ci.yml/badge.svg)](https://github.com/ashishodu2023/TideVec/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/tidevec)](https://pypi.org/project/tidevec/)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-orange)](https://en.cppreference.com/w/cpp/20)
-[![Docker](https://img.shields.io/badge/Docker-CPU%20%7C%20GPU%20%7C%20TPU-blue)](docker/)
 
-[**Docs**](https://docs.tidevec.com) · [**tidevec.com**](https://tidevec.com) · [**CortexOps**](https://getcortexops.com)
+[**tidevec.com**](https://tidevec.com) · [**Docs**](docs/) · [**Examples**](examples/) · [**Benchmarks**](benchmarks/temporal_real_data/) · [**Changelog**](CHANGELOG.md) · [**Roadmap**](ROADMAP.md)
 
 </div>
 
 ---
 
-## The Problem With Every Existing Vector Database
+## The problem
 
-Every vector database — Pinecone, Qdrant, Milvus, Weaviate, Chroma — treats embeddings as **eternal truths**. A document inserted 18 months ago ranks equally with one inserted yesterday. There is no concept of time, contradiction, or causal relationships.
+Most vector search ranks purely on semantic similarity. When a document is revised, the old version
+usually stays in the index, and because it is often longer or more "definitional" it can score
+*higher* than the current one. Your assistant confidently cites a refund policy that changed three
+weeks ago.
 
-Production RAG systems decay 8–12% recall annually due to embedding staleness. Teams spend thousands of dollars weekly re-embedding entire corpora just to keep results fresh. And when an agent stores contradictory facts, nobody knows.
+The usual workarounds each have a failure mode:
 
-**TideVec solves all three.**
+- **Hard timestamp filters** (`age <= N days`) silently drop authoritative documents that simply
+  haven't been rewritten recently.
+- **Recency reranking** (decay formulas in Qdrant's Query API, Milvus decay rankers) reorders the
+  candidates similarity search already returned. It fixes the top hit, but older versions of the same
+  document still fill the rest of the context window.
+- **Manual deletes / TTLs** require someone to know which documents were superseded.
 
----
+TideVec handles this in the database:
 
-## Live Demo — Temporal Decay in Action
-
-The same text, two different ages. TideVec ranks the stale copy last — automatically.
-
-![Temporal ranking demo — same semantic score, ranked last due to 30-day age](docs/images/temporal-ranking-demo.png)
-
-The backdated 2023 policy doc has a **higher semantic score (0.837)** than the 2024 update (0.822) — but its final blended score drops to **0.601** because it is 30 days old against a 7-day half-life. `staleness_warning=True` is surfaced directly to the LLM context. No re-embedding. No manual TTL. No filters.
-
-### Ebbinghaus exponential decay curve
-
-![Temporal decay curve — score halves every 7 days, reaching 0.051 at day 30](docs/images/temporal-decay-curve.png)
-
-```
-temporal_score = 2^(−age_days / half_life_days)
-
-day  0 → 1.000   (just indexed, maximum freshness)
-day  7 → 0.500   (one half-life)
-day 14 → 0.250   (two half-lives)
-day 30 → 0.051   (our stale doc — proven in live demo above)
-
-final_score = 0.7 × semantic + 0.3 × temporal
-```
-
-Decay rate is configurable per collection via `half_life_ms`. Presets: `HalfLife.ONE_HOUR`, `ONE_DAY`, `ONE_WEEK`, `ONE_MONTH`, `ONE_YEAR`.
+1. **Recency is part of the score inside the HNSW search**, with a per-collection half-life and a
+   per-query blend.
+2. **Supersession:** on upsert, TideVec links a new version to the older versions it replaces (same
+   document key, or similarity above a threshold). Results carry `superseded_by`, and superseded
+   versions can be demoted or dropped, no time window to tune.
+3. **Typed edges** (`UPDATES`, `CONTRADICTS`, `CAUSES`, ...) are stored with the vectors, so a search
+   can flag contradicted results or expand to related facts.
 
 ---
 
-## Benchmarks — TideVec vs Qdrant Timestamp Filter
+## Quick start
 
-Reviewer question: *"Can't I just put a `timestamp` in Qdrant payload and filter `age <= N days`?"*
+### Embedded (no server)
 
-**Short answer: no.** A metadata filter is a hard include/exclude. TideVec's temporal score is a continuous rerank. On a 64-document synthetic refund-policy corpus (8 topics × 4 dated versions + 32 distractors), that distinction is decisive.
+```bash
+pip install "tidevec[embedded]"      # Linux x86_64/arm64, macOS arm64; Python 3.9-3.13
+```
 
-### Setup
+```python
+from tidevec import Local, HalfLife
+
+db = Local("./tidevec_data")
+db.create_collection("policies", dim=384, half_life_ms=HalfLife.ONE_MONTH, temporal_blend=0.3,
+                     # link a new upsert to older vectors with the same doc_id that it resembles
+                     supersession=True, supersede_match_field="doc_id", supersede_threshold=0.5)
+
+db.upsert("policies", [
+    {"id": "refunds-2025", "embedding": old_vec, "payload": {"doc_id": "refunds"}},
+    {"id": "refunds-2026", "embedding": new_vec, "payload": {"doc_id": "refunds"}},
+])
+
+for hit in db.search("policies", query_vec, top_k=5, superseded_penalty=1.0):
+    print(hit.id, round(hit.score, 3), "superseded by" if hit.superseded_by else "", hit.superseded_by)
+```
+
+`Local` and the server client `TideVec("host:6399")` have the same methods.
+Runnable version: [`examples/01_quickstart_embedded.py`](examples/01_quickstart_embedded.py).
+
+### Server
+
+```bash
+export TIDEVEC_API_KEY="your-secret-key"
+docker run -p 6399:6399 -e TIDEVEC_API_KEY \
+  -v tidevec_data:/data -v tidevec_backups:/backups averm004/tidevec:latest
+```
+
+```python
+from tidevec import TideVec
+db = TideVec("localhost:6399")          # reads TIDEVEC_API_KEY from the environment
+```
+
+`latest` is the newest release (`0.3.0`, `0.3` and `X.Y.Z-cpu` tags are also published, for amd64 and
+arm64); `main` tracks the main branch. The amd64 image needs an x86-64-v3 CPU (AVX2 + FMA).
+
+### Frameworks and agents
 
 | | |
 |---|---|
-| **Corpus** | 64 docs — electronics / software / shipping / apparel / warranty / digital / subscription / damaged-item policies, each with 4 dated versions, plus FAQ & off-topic distractors |
-| **Queries** | 8 policy questions with a known gold *current* doc |
-| **Semantic trap** | Stale versions intentionally score **0.837** cosine vs current **0.822** (same gap as the live demo above) |
-| **TideVec** | `half_life = 7 days`, `temporal_blend β = 0.3` → `final = 0.7·cosine + 0.3·2^(−age/7)` |
-| **Qdrant baselines** | (1) cosine-only (2) hard filter `age ≤ 14d` (3) hard filter `age ≤ 30d` |
-| **Reproduce** | `python3 benchmarks/temporal_vs_qdrant/run_benchmark.py` (stdlib only) |
-
-Half the topics have a fresh current policy (1–5 days old). The other half have an *authoritative but unrevised* current policy aged 18–22 days — still the correct answer, just outside a naïve 14-day window.
-
-### Results
-
-| Strategy | Gold@1 ↑ | Stale@1 ↓ | Mean gold rank ↓ | nDCG@5 ↑ |
-|---|---:|---:|---:|---:|
-| Qdrant cosine-only | 0% | **100%** | 4.00 | 0.601 |
-| Qdrant filter ≤14d | 50% | 0% | 6.00 | 0.409 |
-| Qdrant filter ≤30d | 0% | **100%** | 2.00 | 0.633 |
-| **TideVec blend β=0.3** | **100%** | **0%** | **1.00** | **1.000** |
-
-Cohort split (Gold@1):
-
-| Strategy | Fresh current (n=4) | Current policy >14d old (n=4) |
-|---|---:|---:|
-| Qdrant cosine-only | 0% | 0% |
-| Qdrant filter ≤14d | 100% | **0%** |
-| Qdrant filter ≤30d | 0% | 0% |
-| **TideVec** | **100%** | **100%** |
-
-### What this shows
-
-```
-Qdrant cosine-only     → always returns the outdated policy (higher semantic score)
-Qdrant filter ≤14d     → works iff current doc is inside the window;
-                          silently drops authoritative policies aged 18–22d
-Qdrant filter ≤30d     → re-admits stale v3 docs that still beat current on cosine
-TideVec soft decay     → demotes stale continuously; no window to tune
-```
-
-```
-# Qdrant "equivalent" — binary, brittle
-client.search(query, filter=Filter(must=[
-    FieldCondition(key="age_days", range=Range(lte=14))  # pick a number, hope
-]))
-
-# TideVec — continuous, first-class in HNSW beam
-db.search("docs", query, temporal_blend=0.3)  # half_life set on collection
-# final_score = 0.7 × cosine + 0.3 × 2^(−age_days / 7)
-```
-
-Full methodology, per-query traces, and optional live-Qdrant validation: [`benchmarks/temporal_vs_qdrant/`](benchmarks/temporal_vs_qdrant/).
+| LangChain | `from tidevec.integrations.langchain import TideVecVectorStore` ([example](examples/02_langchain_rag.py)) |
+| LlamaIndex | `from tidevec.integrations.llamaindex import TideVecVectorStore` ([example](examples/03_llamaindex.py)) |
+| Agent memory | `from tidevec.memory import AgentMemory`: `remember` / `recall` / `history` / `forget`, where a new fact with the same key supersedes the old one |
+| MCP | `tidevec-mcp` exposes that memory to Claude Desktop, Cursor and other MCP clients ([setup](examples/04_agent_memory/)) |
 
 ---
 
-## What Makes TideVec Novel
+## Benchmark on real revision history
 
-### 1. TVIndex — Temporal Vector Index
-**The only ANN index where time is a first-class scoring dimension.**
+[`benchmarks/temporal_real_data/`](benchmarks/temporal_real_data/): the lead sections of 55 Wikipedia
+articles at five points in time (270 documents, 2-5 versions per article), embedded with
+`bge-small-en-v1.5`. The question for each article is whether search returns the **current** version.
 
-Every vector carries a `half_life`. The temporal decay weight is integrated **directly into HNSW graph traversal** — not applied as a post-filter:
+| Strategy | Current@1 (today) | Current@1 (as of mid-2025) | Stale versions in top-5 (mid-2025) |
+|---|---:|---:|---:|
+| Cosine only | 18.2% | 27.3% | 2.89 |
+| Hard filter, 1 year | 100% | **0%** | 0.00 |
+| Cosine top-50, then recency rerank | 100% | 100% | 0.91 |
+| TideVec recency blend | 100% | 100% | 0.91 |
+| TideVec + supersession | 100% | 100% | **0.00** |
+
+What this shows, and what it does not:
+
+- Plain similarity returned an outdated version for 55-85% of queries across query sets.
+- **TideVec's in-search blend produced the same rankings as a rerank with the same formula.** On this
+  data its advantage is operational (one stage, no candidate-pool size, works with filters), not
+  accuracy.
+- A 1-year hard filter was perfect while documents were fresh and returned nothing relevant once the
+  current versions were 1.5 years old.
+- **Supersession is what removes stale context:** recency alone left ~0.9 outdated versions in each
+  top-5; supersession removed all of them. Without a document key, a similarity threshold of 0.95
+  (`vector_score`, raw cosine 0.90) linked versions with 100% precision and flagged 95.8% of stale
+  documents.
+
+Caveats: 55 articles, one small embedding model, templated queries. Full tables and the scripts are
+in the benchmark folder. The older [`temporal_vs_qdrant`](benchmarks/temporal_vs_qdrant/) benchmark
+uses hand-set similarities to illustrate one failure mode; use the real-data one for claims.
+
+---
+
+## Features
+
+### Time-aware ranking (TVIndex)
 
 ```
-final_score(v, q, t) = α · cosine(v, q) + β · exp(−λ · Δt / half_life)
+final_score = (1 − β) · similarity + β · 2^(−age / half_life)
 ```
 
-The beam search priority queue sorts by this blended score during graph navigation. Stale vectors lose rank during traversal itself. No re-embedding required. No manual TTL management.
+`similarity` is the metric's score in [0, 1] (for cosine, `(1 + cos) / 2`). `β` is the collection's
+`temporal_blend`, overridable per query (`temporal_blend=0.0` gives pure similarity). The blended score
+is used inside the HNSW beam search, not only on the final candidates. Results also carry
+`vector_score`, `temporal_score` and a `staleness_warning` when the recency weight drops below the
+collection's `staleness_threshold`. Half-life presets: `HalfLife.ONE_HOUR` ... `ONE_YEAR`.
+
+### Supersession
 
 ```python
-# Fresh vectors rank higher automatically
-db.create_collection("docs", dim=768,
-    half_life_ms=HalfLife.ONE_WEEK,   # 7-day decay
-    temporal_blend=0.3)               # 70% semantic + 30% recency
+db.create_collection("kb", dim=768, supersession=True,
+                     supersede_threshold=0.92,          # vector_score needed to link two versions
+                     supersede_match_field="doc_id")    # optional: only link equal doc_ids
 ```
 
-### 2. CausalEdge — Native Typed-Edge Graph
-**Causal relationships stored co-located with vectors. No separate Neo4j.**
+On each upsert TideVec looks for older vectors the new one replaces and adds an `UPDATES` edge (mirrored
+as `superseded_by` on the old one, across shards). Search results expose `hit.superseded_by`;
+`superseded_penalty=1.0` pushes superseded versions to the bottom. Linking happens at write time, so a
+query never has to guess which version is current.
 
-```
-CAUSES · CONTRADICTS · UPDATES · ENTITY_OF · RELATED_TO · SUPPORTS
-```
+### Typed edges and contradictions
 
-BFS traversal up to N hops in a single query. Contradiction detection, entity resolution, causal expansion — all in one call:
+`CAUSES · CONTRADICTS · UPDATES · ENTITY_OF · RELATED_TO · SUPPORTS`, stored per shard next to the
+vectors. `mode="contradiction_check"` fills `hit.contradicted_by` from `CONTRADICTS` edges (stored
+symmetrically); `mode="causal_expand"` adds neighbours up to `causal_hops` away.
+TideVec does not judge contradictions itself: `tidevec.contradictions.detect_contradictions` asks an
+LLM judge (OpenAI-compatible, or your own function) whether a new document contradicts or supports its
+nearest neighbours and records the answer as a `CONTRADICTS` or `SUPPORTS` edge.
 
-```python
-# Contradiction detection
-results = db.search("docs", query, mode="contradiction_check")
-for hit in results:
-    if hit.contradicted_by:
-        print(f"{hit.id} contradicted by {hit.contradicted_by}")
+### Deletes and filters
 
-# Causal expansion — find related facts 2 hops out
-results = db.search("docs", query, mode="causal_expand", causal_hops=2)
-```
+`db.delete("kb", ids=[...])` or `db.delete("kb", filter="source=crm")`. Filters are single
+`key=value` equality on payload fields, applied during graph traversal (filtered-out nodes still route
+the search, so selective filters keep their recall).
 
-### 3. RetrievalTrace — Per-Query OTel Observability
-**The only vector database that explains why it returned what it did.**
+In progress on `main` and not part of 0.3.0: JSON filters (`$in`, ranges, dates, `$and`/`$or`),
+point-in-time `as_of` queries, BM25 hybrid search, get-by-id/scroll and collection aliases. They are
+in the REST API (see the [API reference](docs/api/rest.md)) but not yet in the SDKs.
 
-Every query optionally emits a structured trace:
+### DriftBridge: model migration without downtime
 
-```json
-{
-  "strategy":              "ACCEL_GPU_EXACT",
-  "latency_ms":            2.8,
-  "estimated_recall":      0.95,
-  "staleness_warnings":    [{"id":"policy_v1","age_days":18,"temporal_score":0.32}],
-  "contradiction_alerts":  [{"result_id":"v1","contradicted_by":"v2"}]
-}
-```
+When you change embedding models, `start_drift` re-embeds every stored vector in the background by
+calling your endpoint (`POST {"id", "payload"}` → `{"embedding": [...]}`) into a shadow index, while the
+live index keeps serving queries. Writes during the migration are mirrored to the shadow, and the swap
+skips vectors deleted or rewritten in the meantime.
 
-Native CortexOps integration — every trace flows into your observability pipeline.
+Limits: the new model must keep the collection's dimension; the swap applies vectors one by one, so
+queries during the swap (about a second per few hundred vectors) see a mix of old and new embeddings;
+standalone servers only. Re-embed URLs must be allowlisted (`--reembed-allow host`); loopback and
+private addresses additionally need `--reembed-allow-private`, and cloud metadata endpoints are always
+blocked. Walkthrough: [`examples/05_drift_migration.py`](examples/05_drift_migration.py).
 
-### 4. DriftBridge — Zero-Downtime Model Migration
-**Upgrading from ada-002 to text-embedding-3-large? Don't re-embed your corpus.**
+### Retrieval trace
 
-Train a linear projection (Orthogonal Procrustes) on 1,000 paired samples in minutes. Query new-model vectors against old-model corpus with no downtime:
+`include_trace=True` returns a per-query trace (strategy, latency, staleness warnings, contradiction
+alerts) that can be exported over OTLP with `--otel`.
+
+---
+
+## Index and search internals
+
+**TVIndex** (`include/tidevec/index/tv_index.hpp`) is an HNSW graph (Malkov & Yashunin) with:
+
+- the blended temporal score in the layer-0 beam search;
+- the HNSW neighbour-selection heuristic, so outlying vectors keep incoming links;
+- updates that move an embedding tombstone the old node and insert a new one (metadata-only updates
+  stay in place); tombstones keep routing searches and are compacted away by a rebuild once they
+  reach the number of live vectors;
+- filters, validity windows and hard staleness exclusion applied during traversal;
+- optional 8-bit product quantization (`use_pq_compression`) with ADC scoring and exact rescoring
+  through a `VectorStore` callback (32× smaller vector storage in the unit test: 500 × 96-dim).
+
+| Parameter | Default | |
+|---|---|---|
+| `M` | 16 | edges per node per layer |
+| `ef_construction` | 200 | build beam width |
+| `ef_search` | 128 | query beam width (per query) |
+| `temporal_blend` | 0.3 | weight on recency |
+| `half_life_ms` | 30 days | decay rate |
+
+Other paths: **FlatIndex** (exact, AVX2 dot/L2 kernels), a **CPU IVF** engine, and accelerator
+back-ends selected by `--device`:
+
+- **GPU:** an independent CUDA implementation of the search design from *CAGRA* (Ootomo et al.,
+  ICDE 2024): fixed-degree graph, one warp per query. It is not NVIDIA cuVS/RAFT. It builds with
+  `-DTIDEVEC_CUDA=ON` and has not been benchmarked or validated on GPU hardware in CI; the CPU fallback is
+  what the tests cover.
+- **TPU:** exact batched matmul via XLA when built against `libxla_client`; CI builds the stub only.
+
+Metrics: cosine (default), L2, dot product.
+
+---
+
+## Durability
+
+A standalone server writes every change to a per-shard **write-ahead log** (CRC-checked, replayed on
+start) and, with `--segment-store`, to disk-backed vector segments. `--ultra-durable` (default in the
+Docker image) adds:
+
+- **Reed-Solomon RS(10,4)** encoding of segments (GF(2⁸), any 10 of 14 shards reconstruct);
+- WAL **group commit** (one `fsync` per batch of writes);
+- a **health monitor** that scrubs checksums, tracks lost shards and rebuilds them;
+- an in-process **Raft log** that orders writes.
+
+**Modelled durability**, from `ReedSolomon::durability_nines`: independent disks, each lost with 0.4%
+annual probability (Backblaze AFR), no repair during the year.
+
+| Scheme | Storage overhead | Shard losses survived | Modelled durability |
+|---|---:|---:|---:|
+| 3-way replication | 3.0× | 2 | 7.2 nines |
+| RS(6,3) | 1.5× | 3 | 7.5 nines |
+| **RS(10,4)** | **1.4×** | **4** | **8.7 nines** |
+| RS(14,4) | 1.29× | 4 | 8.1 nines |
+
+**Read this table as a property of the coding scheme, not of a deployment.** Today all shards of a
+standalone server live on **one host**, so losing that host's disk loses the data regardless of the
+coding; use backups (`--backup`, S3/GCS upload, point-in-time restore). Repairing lost shards within
+hours would add orders of magnitude to the modelled figures; that is not modelled. The in-process Raft
+group gives ordering, not availability: every member runs in the same process.
+
+---
+
+## Experimental: replicated cluster mode
+
+Three or more `tidevec-server` processes can replicate every write through Raft over HTTP:
 
 ```bash
-tidevec drift-bridge train --collection docs --pairs 1000
-# Done in 4 minutes. No service interruption.
+PEERS="0=http://10.0.0.1:6399,1=http://10.0.0.2:6399,2=http://10.0.0.3:6399"
+export TIDEVEC_CLUSTER_SECRET=...        # same on every node; guards the /raft/* endpoints
+tidevec-server --port 6399 --data-dir ./data --node-id 0 --raft-peers "$PEERS"   # node 1, 2 likewise
 ```
+
+How it behaves:
+
+- **Writes** (create/drop collection, upsert, delete, edges, temporal settings) go to the leader,
+  which appends them to the Raft log and answers once the write is committed and applied locally.
+- **Followers reject writes** with HTTP `421` and the leader's URL (`X-TideVec-Leader` header and
+  `leader` field). The Python, Go and Java clients follow the hint automatically; Python raises
+  `NotLeaderError` if no leader is reachable.
+- **Reads are served locally** by whichever node you ask, so a follower may briefly lag the leader.
+- Term, vote and log are persisted with fsync and survive restarts; a torn log tail is discarded.
+  `GET /v1/cluster/status` reports role, term, leader and commit/applied indexes.
+
+**Not production-ready.** Every node holds a full copy (no sharding across hosts); in 0.3.0 there are
+no log snapshots or compaction (the log grows without bound), no membership changes and no
+linearizable reads (all three are in progress on `main`), and DriftBridge is disabled. `--ultra-durable` is turned off in this mode. It is covered by
+multi-process tests (replication, failover, catch-up, restart, auth), not by production use.
 
 ---
 
-## Similarity Search Algorithms
+## SDKs
 
-TideVec routes each query to the optimal algorithm based on batch size, hardware, and recall budget:
-
-### Algorithm 1: TVIndex (Modified HNSW) — Default Production Index
-
-**File:** `include/tidevec/index/tv_index.hpp`
-
-HNSW (Hierarchical Navigable Small World) with temporal decay baked into graph traversal scoring. Identical structure to standard HNSW but the priority queue comparator uses the blended score above, not raw cosine.
-
-**Build phase:**
-1. Assign random level `l` (probability exponential in `1/M`)
-2. Greedy descent from top layer to `l+1`
-3. At each layer `0..l`: beam search (`ef_construction=200` candidates) → connect M nearest neighbours
-4. Prune neighbours to M if overfull
-
-**Search phase:**
-1. Greedy descent top → layer 1 (single closest node per layer)
-2. Beam search at layer 0 with `ef_search=128` candidates
-3. Return top-K by blended temporal score
-
-**Parameters:**
-
-| Parameter | Default | Effect |
+| Language | Package | Notes |
 |---|---|---|
-| `M` | 16 | Edges per node per layer (graph density) |
-| `ef_construction` | 200 | Beam width during build (quality vs speed) |
-| `ef_search` | 128 | Beam width during search (recall vs latency) |
-| `temporal_blend` | 0.3 | Weight on time-decay vs cosine similarity |
-| `half_life_ms` | 30 days | Decay rate (lower = faster staleness) |
+| Python | `pip install tidevec` (`[embedded]`, `[langchain]`, `[llamaindex]`, `[mcp]` extras) | server client, `Local` embedded mode, embedders, integrations |
+| Go | `sdk/go` | `go get github.com/ashishodu2023/TideVec/sdk/go` |
+| Java | `sdk/java` (Maven, Java 17+) | no runtime dependencies |
+| C++ | `sdk/cpp` | header-only REST client; not updated for 0.3.0 (no supersession settings, and `drop_collection` does not drop), see [docs](docs/sdks/cpp.md) |
+| TypeScript | `sdk/typescript` | in progress, not published to npm |
+
+All clients speak the REST API below. **0.3.0 breaking changes:** Go `SearchOptions.TemporalBlend` is
+now `*float32` (use `tidevec.Blend(x)`; `nil` means "collection default"), Go `Delete` takes
+`(ids, filter)` and returns the count; Java `SearchOptions.temporalBlend` is a nullable `Float` and
+`deleteVectors` returns the count.
 
-**Memory-compressed storage (opt-in):**
-
-Vanilla HNSW must keep every full-precision vector resident in RAM alongside `O(M)` neighbour pointers per node. At billion-vector scale, raw vector storage alone dominates cost — e.g. a 768-dim float32 embedding is 3072 bytes before any graph overhead.
-
-`TVIndexConfig::use_pq_compression` stores an 8-bit Product Quantization code instead of the raw embedding. Graph traversal scores candidates via asymmetric distance computation (ADC) against these codes directly — the coarse HNSW walk never needs to decode a full vector. Final top-K results can optionally be exact-rescored via an injectable `VectorStore` callback that fetches full vectors from an external backing store (disk, object store), matching the standard DiskANN pattern.
-
-Measured result (500 vectors, dim=96, M=12 subspaces):
-
-```
-[uncompressed] mem=192000 bytes
-[compressed]   mem=6000 bytes   (32x smaller)
-```
-
-```cpp
-TVIndexConfig cfg;
-cfg.use_pq_compression = true;
-cfg.pq_subspaces = 96;          // must divide embedding dim evenly
-TVIndex idx(cfg);
-
-// Train the quantizer on a representative sample BEFORE inserting
-idx.train_quantizer(sample_vectors);   // ~10K-100K vectors is typical
-
-// Optional: wire in a backing store for exact top-K rescoring
-idx.set_vector_store([](const std::string& id) {
-    return fetch_full_vector_from_disk(id);   // your implementation
-});
-
-idx.insert(vec);   // stores PQ code only, not the raw embedding
-auto results = idx.search(query, opts);
-```
-
-Without compression (default), behaviour is byte-for-byte identical to before this feature was added — 28/28 existing unit tests pass unchanged.
-
-### Algorithm 2: GPU CAGRA — Warp-Level Beam Search
-
-**Files:** `include/tidevec/accelerator/gpu_engine.hpp`, `src/accelerator/gpu_kernels.cu`
-
-Based on: *Ootomo et al., "CAGRA: Highly Parallel Graph Construction and Approximate Nearest Neighbor Search for GPUs", ICDE 2024.*
-
-**Key difference from HNSW:** Fixed out-degree (no hierarchy), directed graph, uniform computation → no warp divergence on GPU.
-
-**Build — `cuda_nn_descent()`:**
-- One CUDA thread block per node (one warp = 32 threads)
-- LCG random sampling for candidates (register-resident, no global memory)
-- Sorted neighbour list maintained in shared memory
-- 20 NN-Descent iterations → approximate kNN graph
-
-**Search — `cagra_beam_search_kernel()`:**
-- **Each warp (32 threads) handles exactly ONE query**
-- 32 threads score 32 neighbours in parallel per iteration
-- Sorted beam list maintained in shared memory (`itopk_size` slots)
-- Terminates when no improvement for 5 consecutive iterations
-- No warp divergence: all 32 lanes execute same instruction
-
-**Why 33–77× faster than HNSW:**
-HNSW is single-threaded per query (sequential heap operations). CAGRA parallelises the inner loop across 32 GPU threads. One A100 runs 6,912 warps simultaneously = 6,912 parallel queries.
-
-### Algorithm 3: TPU XLA Matmul — Exact Batch Search
-
-**Files:** `include/tidevec/accelerator/tpu_engine.hpp`, `src/accelerator/tpu_kernels.cc`
-
-Vector search IS matrix multiplication:
-```
-S[B, N] = Q[B, D] × DB[D, N]ᵀ      (cosine similarity, pre-normalised)
-```
-
-The TPU MXU (256×256 systolic array) executes this natively. JIT-compiled once per `(B, N, D)` shape via XLA, then executes in microseconds:
-
-```cpp
-// XLA computation graph (compiled once, executed many times)
-auto q_unit  = normalise(q);
-auto db_unit = normalise(db);
-auto scores  = DotGeneral(q_unit, db_unit, {contract_dim});  // [B, N]
-auto topk    = TopK(scores, k, largest=true);               // [B, k]
-```
-
-**Key advantage:** 100% recall (exact search). At 2M QPS on TPU v5e pod, this is the highest-throughput path for batch workloads.
-
-### Algorithm 4: CPU IVF (Inverted File Index)
-
-**File:** `include/tidevec/accelerator/cpu_engine.hpp`
-
-Standard IVF for 100M+ CPU-scale search. Two phases:
-
-1. **Build:** k-means, `nlist=1024` Voronoi centroids
-2. **Search:** find `nprobe=64` nearest centroids → exact AVX2 scan within those cells
-
-Searches 6.25% of the database (64/1024) at ~95% recall. 10× faster than flat exact search.
-
-### Algorithm 5: FlatIndex — Exact Brute Force
-
-**File:** `include/tidevec/index/flat_index.hpp`
-
-`O(N·D)` exhaustive scan. Used as ground-truth baseline for benchmarks and small collections. Powered by AVX2-accelerated kernels:
-
-```cpp
-// GCC auto-vectorises to AVX2 VFMADD instructions with -mavx2 -mfma
-float dot_avx2(const float* a, const float* b, int n);   // dot product
-float l2sq_avx2(const float* a, const float* b, int n);  // L2²
-```
-
-### Distance Metrics
-
-All three metrics implemented in `include/tidevec/core/metrics.hpp`:
-
-| Metric | Formula | Best for |
-|---|---|---|
-| **Cosine** (default) | `1 − (a·b)/(‖a‖·‖b‖)` | NLP embeddings (OpenAI, SBERT) |
-| **L2 / Euclidean** | `√Σ(aᵢ−bᵢ)²` | Image embeddings, SIFT, CLIP |
-| **Dot product** | `−(a·b)` | RLHF reward models, ColBERT |
-
-### Algorithm Dispatch Logic
-
-```
-Query arrives at AcceleratorDispatcher
-    │
-    ├─ batch_size ≥ 64 AND GPU available?  → CAGRA (warp beam search)
-    ├─ batch_size ≥ 32 AND TPU available?  → XLA matmul (exact, 100% recall)
-    ├─ recall_budget = 1.0?                → FlatIndex (exact brute force)
-    ├─ N > 10M AND CPU-only?               → IVF (nprobe scan, ~95% recall)
-    └─ default                             → TVIndex HNSW (temporal-aware)
-```
-
-Source: `include/tidevec/accelerator/dispatcher.hpp`
-
----
-
-## Durability: 11 Nines (99.999999999%)
-
-### How we get there
-
-**Old approach (TideVec v0.1):** 3-way replication. Survives 2 node failures. ~200% storage overhead. ~5–6 nines durability.
-
-**New approach (v0.2+):** Reed-Solomon erasure coding RS(10,4).
-
-**The math (from Backblaze AFR data, Q4 2024):**
-
-```
-p_fail = 0.004 (0.4% annual disk failure rate)
-RS(10,4): 14 total shards, any 10 reconstruct data
-P(data loss) = P(≥5 of 14 disks fail simultaneously)
-             = Σ C(14,i) · p^i · (1-p)^(14-i)  for i=5..14
-             ≈ 1.7 × 10⁻¹¹ per year
-             = 99.999999998% = 10.8 nines ≈ 11 nines ✓
-```
-
-**Storage advantage:**
-
-| Strategy | Overhead | Survives | Nines |
-|---|---|---|---|
-| 3-way replication | 3.0× | 2 failures | ~6 |
-| RS(6,3) | 1.5× | 3 failures | 7.9 |
-| **RS(10,4)** | **1.4×** | **4 failures** | **10.7** |
-| RS(14,4) | 1.3× | 4 failures | 11.5 |
-
-*RS(10,4) gives 11-nines durability at 1.4× storage overhead — vs 3× for replication and only ~6 nines. This is exactly how AWS S3 achieves 11 nines.*
-
-### Reed-Solomon Implementation
-
-**File:** `include/tidevec/erasure/reed_solomon.hpp`
-
-Full GF(2⁸) Galois Field arithmetic with precomputed exp/log tables:
-
-```
-GF(2^8), primitive polynomial: x^8+x^4+x^3+x^2+1
-
-Encode: shards[i] = Vandermonde(14,10) × data_vector  (per byte position)
-Decode: data = inverse(submatrix(available_rows)) × available_shards
-```
-
-Decode uses Gaussian elimination over GF(2⁸). Any 10 of 14 shards reconstruct data exactly.
-
-### Verified test results:
-
-```
-RS(4,2)  — survive 1/6 failure:  PASS
-RS(4,2)  — survive 2/6 failures: PASS
-RS(10,4) — survive 4/14 failures: PASS  (1MB segment, random data)
-RS(4,2)  — 5 shards requested, only 3 available: throws correctly PASS
-Storage overhead: 1.40× (RS(10,4)) PASS
-Durability nines: 10.7 at p_fail=0.004 PASS
-```
-
----
-
-## Availability: 9 Nines (99.9999999%)
-
-### Raft Consensus — Strong Consistency
-
-**File:** `include/tidevec/consensus/raft.hpp`
-
-TideVec implements the full Raft protocol (Ongaro & Ousterhout, USENIX ATC 2014):
-
-**Why Raft instead of simple quorum writes:**
-
-| Property | Simple Quorum | Raft |
-|---|---|---|
-| Split-brain possible | Yes | **Never** |
-| Linearisable reads | No | **Yes** |
-| Auto failover | Manual | **< 150ms** |
-| Log ordering | None | **Global LSN** |
-| Membership changes | Restart | **Online** |
-
-**5-node cluster availability math:**
-
-```
-p_node_down = 0.001 (0.1% per node)
-P(≥3 of 5 down) = C(5,3)·p³ + C(5,4)·p⁴ + C(5,5)·p⁵
-                ≈ 10 · (0.001)³
-                ≈ 1 × 10⁻⁸
-= 99.999999% = 8 nines
-With multi-AZ placement: 9 nines ✓
-```
-
-**Key Raft properties verified:**
-
-```
-Pigeonhole: 2 × majority(5) = 6 > 5 → only one leader possible   PASS
-One vote per term per node → no split brain                       PASS
-Terms monotonically increase: seen(T) → current_term ≥ T         PASS
-5-node: losing 2 → 3 remaining ≥ majority(3) → still commits    PASS
-5-node: losing 3 → 2 remaining < majority(3) → stalls safely     PASS
-```
-
-### Health Monitor — Active Self-Healing
-
-**File:** `include/tidevec/health/health_monitor.hpp`
-
-Three background threads running continuously:
-
-**1. Heartbeat thread** (every 5s): Pings all 14 shard nodes. If no response for 15s (3 missed), marks node FAILED, queues for repair.
-
-**2. Scrub thread** (every 24h default): Verifies xxhash64 checksum of every stored shard against recorded value. Detects silent bit rot. Triggers re-encoding if mismatch found.
-
-**3. Repair thread**: When a node fails, finds all segments with a shard on that node, RS-decodes from surviving shards, re-encodes to a healthy replacement node, updates metadata.
-
-**MTTR (Mean Time To Repair):** < 1 hour for a single disk failure at 1TB segment size.
-
----
-
-## WAL Group Commit — Write Throughput
-
-**File:** `include/tidevec/cluster/ultra_durable_collection.hpp`
-
-Naive WAL: one `fsync()` per write. At 10ms fsync latency: 100 writes/sec ceiling.
-
-TideVec group commit: batch N writes, one `fsync()`:
-
-```
-100,000 writes:
-  Without batching: 100,000 fsyncs × 10ms = 1,000 seconds
-  With batch=1000:      100 fsyncs × 10ms =     1 second   (1000× faster)
-```
-
-The flush thread waits up to 2ms for more writes to accumulate, then fsyncs the entire batch. All writers blocked on `promise::get_future()` are notified simultaneously.
-
----
-
-## Performance at 1 Billion Vectors
-
-| Path | Index | QPS | Latency P99 | Recall@10 | Memory |
-|---|---|---|---|---|---|
-| **TPU** (v5e ×8) | XLA matmul | ~2M | 1ms | 100% | 128GB HBM |
-| **GPU** (A100 ×12) | CAGRA | ~1M | 3ms | 95% | 96GB PQ |
-| **GPU** (A100) | cuBLAS exact | ~500K | 5ms | 100% | 96GB raw |
-| **CPU** (64-core ×10) | TVIndex IVF | ~50K | 20ms | 95% | 3.1TB SSD |
-| CPU HNSW (Qdrant ref) | HNSW | ~15K | 65ms | 95% | 3.1TB SSD |
-
-**Memory at 1B vectors, dim=768:**
-
-| Storage | Size | Notes |
-|---|---|---|
-| Raw float32 | 3.1 TB | Full precision on SSD |
-| PQ(M=96) compressed | 96 GB | Fits in A100 HBM, 32× compression |
-| RS(10,4) parity overhead | +40% | 4.3 TB total on disk |
-| HNSW graph (M=16) | ~256 GB | SSD-resident via mmap |
-
----
-
-## Test Suite: 127/127 Passing
-
-```
-╔══════════════════════════════════════════════════╗
-║            TideVec Test Results                 ║
-╠══════════╦════════════╦══════════════════════════╣
-║ Suite    ║ Tests      ║ Coverage                 ║
-╠══════════╬════════════╬══════════════════════════╣
-║ Unit     ║  28 / 28   ║ TVIndex, FlatIndex,      ║
-║          ║            ║ CausalGraph, temporal    ║
-║          ║            ║ math, TTL, dedup         ║
-╠══════════╬════════════╬══════════════════════════╣
-║ Scale    ║  16 / 16   ║ WAL crash recovery,      ║
-║          ║            ║ ShardRouter, ReplicaSet, ║
-║          ║            ║ 100 concurrent writes    ║
-╠══════════╬════════════╬══════════════════════════╣
-║ API      ║  23 / 23   ║ All REST endpoints,      ║
-║          ║            ║ filter, trace, causal,   ║
-║          ║            ║ edges, temporal update   ║
-╠══════════╬════════════╬══════════════════════════╣
-║ Accel    ║  28 / 28   ║ AVX2 kernels, GPU/TPU   ║
-║          ║            ║ stubs, dispatcher,       ║
-║          ║            ║ IVF recall, batch search ║
-╠══════════╬════════════╬══════════════════════════╣
-║ 11-nines ║  32 / 32   ║ GF(256) arithmetic,     ║
-║          ║            ║ RS encode/decode,        ║
-║          ║            ║ Raft safety proofs,      ║
-║          ║            ║ health monitor,          ║
-║          ║            ║ durability math          ║
-╠══════════╬════════════╬══════════════════════════╣
-║ TOTAL    ║ 127 / 127  ║ ALL PASSED               ║
-╚══════════╩════════════╩══════════════════════════╝
-```
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    TideVec Platform                            │
-│                                                                 │
-│  REST API (:6399)      gRPC API (:6400)      WebSocket          │
-│         └──────────────────┬───────────────────┘               │
-│                            ↓                                    │
-│              AcceleratorDispatcher                              │
-│         GPU (CAGRA) │ TPU (XLA) │ CPU (AVX2 HNSW/IVF)         │
-│                            ↓                                    │
-│              UltraDurableCollection                             │
-│    ┌────────────────────────────────────────────────┐          │
-│    │  Raft Consensus (5-node, <150ms failover)       │          │
-│    │  ↓                                             │          │
-│    │  ShardRouter (10 shards, scatter-gather)        │          │
-│    │    └─ RS(10,4) ErasureCoded SegmentStore        │          │
-│    │    └─ WAL GroupCommit (1000 writes/fsync)       │          │
-│    │  ↓                                             │          │
-│    │  TVIndex (HNSW + temporal decay scoring)        │          │
-│    │  CausalEdge (typed graph, BFS traversal)        │          │
-│    │  HealthMonitor (scrub + repair + heartbeat)     │          │
-│    └────────────────────────────────────────────────┘          │
-│                            ↓                                    │
-│              ProductQuantizer (PQ, 32× compression)             │
-│              RetrievalTrace → OTel → CortexOps                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Language SDKs
-
-Single proto source of truth → compiled to all four languages.
-
-### Python
-```bash
-pip install tidevec
-```
-```python
-import os
-from tidevec import TideVec, HalfLife, RateLimitError
-
-db = TideVec("localhost:6399", api_key=os.environ["TIDEVEC_API_KEY"])
-
-db.create_collection("docs", dim=768, half_life_ms=HalfLife.ONE_WEEK)
-db.upsert("docs", [{"id":"v1","embedding":[...],"payload":{"src":"wiki"}}])
-
-results = db.search("docs", query, top_k=10, include_trace=True)
-for hit in results:
-    print(f"{hit.id}  score={hit.score:.4f}  temporal={hit.temporal_score:.3f}")
-
-# DriftBridge — zero-downtime model migration
-db.start_drift("docs", reembed_url="https://embed.example.com/v1/embed")
-print(db.drift_status("docs"))
-
-# Admin — backups
-snapshot = db.trigger_backup()
-print(db.list_backups())
-
-# Handles rate limits automatically (retries with backoff)
-try:
-    db.search("docs", query)
-except RateLimitError:
-    pass
-```
-
-### Go
 ```go
-db, _ := tidevec.New("localhost:6399", tidevec.ClientConfig{
-    APIKey: os.Getenv("TIDEVEC_API_KEY"),
-    TLS:    true,
-})
-defer db.Close()
-
-db.CreateCollection(ctx, tidevec.CollectionConfig{Name: "docs", Dim: 768})
-db.Upsert(ctx, "docs", vectors)
-resp, _ := db.Search(ctx, "docs", query, tidevec.SearchOptions{TopK: 10})
-
-// DriftBridge + backups
-db.StartDrift(ctx, "docs", "https://embed.example.com/v1/embed")
-status, _ := db.DriftStatus(ctx, "docs")
-snapshot, _ := db.TriggerBackup(ctx)
+db, _ := tidevec.New("localhost:6399", tidevec.ClientConfig{APIKey: os.Getenv("TIDEVEC_API_KEY")})
+resp, _ := db.Search(ctx, "docs", query, tidevec.SearchOptions{TopK: 10, Filter: "lang=en"})
+n, _ := db.Delete(ctx, "docs", nil, "source=crm")
 ```
 
-### Java
 ```java
 try (TideVecClient db = TideVecClient.builder("localhost", 6399)
-        .apiKey(System.getenv("TIDEVEC_API_KEY"))
-        .tls(true)
-        .build()) {
-    db.createCollection(CollectionConfig.builder("docs").dim(768).build());
-    db.upsert("docs", vectors);
+        .apiKey(System.getenv("TIDEVEC_API_KEY")).build()) {
     SearchResponse r = db.search("docs", query, SearchOptions.builder().topK(10).build());
-
-    db.startDrift("docs", "https://embed.example.com/v1/embed");
-    DriftStatus status = db.driftStatus("docs");
-    String snapshot = db.triggerBackup();
+    for (SearchHit h : r.hits()) if (h.isSuperseded()) System.out.println(h.id() + " is outdated");
 }
 ```
-
-### C++ (native)
-```cpp
-#include <tidevec/client.hpp>
-
-tidevec::TideVec db("localhost:6399", {.api_key = std::getenv("TIDEVEC_API_KEY")});
-db.create_collection({.name = "docs", .dim = 768});
-db.upsert("docs", vectors);
-auto results = db.search("docs", query);
-
-db.start_drift("docs", "https://embed.example.com/v1/embed");
-db.trigger_backup();
-```
-
----
-
-## Quick Start
-
-```bash
-# Docker — auth enabled by default (API key auto-generated if unset)
-export TIDEVEC_API_KEY="your-secret-key"
-docker run -p 6399:6399 \
-  -e TIDEVEC_API_KEY \
-  -v $(pwd)/data:/data \
-  averm004/tidevec:latest
-
-# Full production stack (auth + backups + observability)
-docker compose -f docker/docker-compose.yml --profile monitoring up -d
-# TideVec   → http://localhost:6399  (requires X-Api-Key header)
-# Prometheus → http://localhost:9090
-# Grafana    → http://localhost:3000
-# Jaeger     → http://localhost:16686
-
-# Kubernetes (Helm)
-helm install tidevec deploy/helm/tidevec \
-  --set secrets.apiKey=your-secret-key \
-  --set persistence.size=100Gi
-```
-
-```bash
-# Build from source (C++20)
-git clone https://github.com/ashishodu2023/TideVec
-cd tidevec && mkdir build && cd build
-
-# CPU only
-cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
-
-# With CUDA GPU (A100/H100/RTX 30/40 series)
-cmake .. -DCMAKE_BUILD_TYPE=Release \
-         -DTIDEVEC_CUDA=ON \
-         -DCMAKE_CUDA_ARCHITECTURES="80;90"
-make -j$(nproc)
-
-# Run all tests (127/127)
-./tidevec_tests && ./tidevec_scale_tests && \
-./tidevec_api_tests && ./tidevec_accel_tests && \
-./tidevec_eleven_nines_tests
-
-# Start server (production defaults)
-./tidevec-server \
-  --host 0.0.0.0 --port 6399 \
-  --require-auth --api-key "$TIDEVEC_API_KEY" \
-  --ultra-durable --segment-store \
-  --device auto --backup --otel
-```
-
----
-
-## Production Deployment
-
-TideVec v0.2 ships with production-hardening enabled by default in Docker and Helm.
-
-### Self-hosted data storage
-
-All collection data, WAL segments, registry metadata, and backups live under a single directory (default `/data` in Docker, `./tidevec_data` locally):
-
-```bash
-mkdir -p "$HOME/data/tidevec"
-docker run -d -p 6399:6399 \
-  -v "$HOME/data/tidevec:/data" \
-  averm004/tidevec:latest
-```
-
-On **Apple Silicon**, use `$HOME/data/tidevec` (not `/data/tidevec` on the host). Mount the same path across restarts for durability — WAL replay restores in-memory indexes on startup.
-
-| Path under data dir | Contents |
-|---------------------|----------|
-| `registry.json` | Collection metadata |
-| `{collection}/wal/` | Write-ahead log per shard |
-| `{collection}/segments/` | Disk-backed vectors (segment store) |
-| `backups/` | Automated snapshots |
-
-### Server features
-
-| Feature | Default (Docker) | Flag / Env |
-|---------|------------------|------------|
-| **Auth required** | ON | `--require-auth`, `TIDEVEC_API_KEY` |
-| **Ultra-durable** (Raft + RS + health monitor) | ON | `--ultra-durable` |
-| **Segment store** (disk-backed vectors) | ON | `--segment-store` |
-| **Automated backups** | ON (compose) | `--backup`, `TIDEVEC_BACKUP=1` |
-| **Rate limiting** | 100 rps / burst 200 | `--rate-limit N` |
-| **OTel trace export** | ON (with monitoring profile) | `--otel --otel-endpoint URL` |
-| **TLS** | nginx sidecar or native | `--tls-cert/--tls-key` or `docker compose --profile tls` |
-| **Multi-tenancy** | OFF | `--multi-tenant` + `tenants.json` |
-
-### Authentication
-
-All `/v1/*` routes require an `X-Api-Key` header when auth is enabled (default in Docker).
-
-```bash
-curl -H "X-Api-Key: $TIDEVEC_API_KEY" \
-  http://localhost:6399/v1/collections
-```
-
-SDKs read `TIDEVEC_API_KEY` from the environment automatically:
-
-```python
-import os
-from tidevec import TideVec
-
-db = TideVec("localhost:6399", api_key=os.environ["TIDEVEC_API_KEY"])
-# or: db = TideVec("localhost:6399")  # reads TIDEVEC_API_KEY env var
-```
-
-### Multi-tenancy
-
-Place `tenants.json` in the data directory (see `deploy/tenants.example.json`):
-
-```json
-[
-  {
-    "id": "tenant_a",
-    "api_key": "tv_key_tenant_a",
-    "max_collections": 50,
-    "max_vectors": 5000000,
-    "collection_prefixes": ["tenant_a_"]
-  }
-]
-```
-
-Start with `--multi-tenant`. Each tenant's API key grants access only to collections matching their prefix.
-
-### Backups & point-in-time recovery
-
-Automated snapshots run every 6 hours (configurable). Upload to object storage:
-
-```bash
-./tidevec-server --backup \
-  --backup-s3 s3://my-bucket/tidevec/ \
-  --backup-gcs gs://my-bucket/tidevec/
-```
-
-Manual trigger via SDK or REST:
-
-```python
-snapshot = db.trigger_backup()       # e.g. "tidevec_1712345678.tar.gz"
-backups  = db.list_backups()
-```
-
-Restore: stop server → extract tarball over data dir → restart (WAL replay restores state).
-
-```python
-# List PITR manifest history
-for m in db.list_backup_manifests():
-    print(m["snapshot"], m["created_at"])
-
-# Restore to a point in time (creates safety snapshot first)
-result = db.restore_backup("tidevec_1712345678.tar.gz")
-print(result["message"])  # restart server after restore
-```
-
-### DriftBridge (model migration)
-
-Zero-downtime embedding model upgrade:
-
-```python
-db.start_drift("docs", reembed_url="https://embed.example.com/v1/embed")
-while True:
-    status = db.drift_status("docs")
-    print(f"{status.phase}: {status.pct_complete:.0f}%")
-    if status.phase in ("COMPLETE", "IDLE", "FAILED"):
-        break
-    time.sleep(5)
-```
-
-The `reembed_url` must be on the server allowlist (`--reembed-allow embed.example.com`). Private IPs and cloud metadata endpoints are always blocked.
-
-### TLS
-
-**Option A — nginx reverse proxy** (recommended):
-
-```bash
-docker compose --profile tls up -d
-# Place certs in docker/nginx/certs/tidevec.crt + tidevec.key
-# Clients connect to https://tidevec.local:443
-```
-
-**Option B — native TLS** (build with OpenSSL):
-
-```bash
-cmake -DTIDEVEC_TLS=ON ..
-./tidevec-server --tls-cert cert.pem --tls-key key.pem
-```
-
-### Kubernetes
-
-```bash
-helm install tidevec deploy/helm/tidevec \
-  --set secrets.apiKey=your-key \
-  --set config.ultraDurable=true \
-  --set config.backup=true \
-  --set persistence.size=100Gi \
-  --set backup.s3Uri=s3://my-bucket/tidevec/
-```
-
-The chart deploys a StatefulSet with persistent volumes, liveness/readiness probes, and a Secret for the API key.
 
 ---
 
 ## REST API
 
 ```
-GET  /health                                  Server status (no auth)
-GET  /v1/info                                 Feature manifest (no auth)
-GET  /metrics                                 Prometheus metrics (no auth)
+GET    /health                               Server status (no auth)
+GET    /v1/info                              Version and feature manifest (no auth)
+GET    /metrics                              Prometheus metrics (no auth)
+GET    /v1/cluster/status                    Raft role/term/leader, or {"mode":"standalone"}
 
-GET  /v1/collections                          List collections          [auth]
-POST /v1/collections                          Create collection         [auth]
-GET  /v1/collections/{name}                   Collection stats          [auth]
-DELETE /v1/collections/{name}                 Drop collection           [auth]
-POST /v1/collections/{name}/upsert            Upsert vectors            [auth, rate-limited]
-POST /v1/collections/{name}/delete            Delete by ID              [auth]
-POST /v1/collections/{name}/search            Search                    [auth, rate-limited]
-POST /v1/collections/{name}/edges             Add causal edges          [auth]
-PUT  /v1/collections/{name}/temporal          Update decay config       [auth]
+GET    /v1/collections                       List collections
+POST   /v1/collections                       Create collection (temporal, agent, supersession settings)
+GET    /v1/collections/{name}                Collection stats
+DELETE /v1/collections/{name}                Drop collection
+POST   /v1/collections/{name}/upsert         Upsert vectors                  [rate-limited]
+POST   /v1/collections/{name}/delete         Delete by ids and/or filter
+POST   /v1/collections/{name}/search         Search                          [rate-limited]
+POST   /v1/collections/{name}/edges          Add typed edges
+PUT    /v1/collections/{name}/temporal       Update half-life / blend
 
-POST /v1/collections/{name}/drift/start       Start model migration     [auth]
-GET  /v1/collections/{name}/drift/status      Migration progress        [auth]
-POST /v1/collections/{name}/drift/abort       Abort migration           [auth]
+POST   /v1/collections/{name}/drift/start    Start model migration (standalone only)
+GET    /v1/collections/{name}/drift/status   Migration progress
+POST   /v1/collections/{name}/drift/abort    Abort migration
 
-POST /v1/admin/backup                         Trigger snapshot          [auth]
-GET  /v1/admin/backups                        List snapshots            [auth]
-GET  /v1/admin/backups/manifests              PITR manifest history     [auth]
-POST /v1/admin/restore                        Restore from snapshot     [auth]
+POST   /v1/admin/backup                      Trigger snapshot
+GET    /v1/admin/backups                     List snapshots
+GET    /v1/admin/backups/manifests           Point-in-time manifest history
+POST   /v1/admin/restore                     Restore from snapshot
 ```
 
-**Error codes:** `401` Unauthorized · `403` Forbidden (tenant/SSRF/quota) · `429` Rate limit exceeded
+`/v1/*` routes need `X-Api-Key` when auth is enabled. Errors: `400` bad request, `401`, `403`
+(tenant, quota or URL not allowed), `404` unknown collection, `421` not the Raft leader, `429` rate
+limited, `503` leadership changed during a write.
 
-### P1 production stack (v0.2)
-
-| Component | Implementation |
-|-----------|----------------|
-| **UltraDurableCollection** | Raft + RS(10,4) + health monitor wired via `--ultra-durable` |
-| **SegmentStore** | Disk-backed `.cvec` segments; TVIndex PQ rescoring via mmap |
-| **AcceleratedCollection** | `--device auto\|gpu\|tpu` dispatches GPU/TPU search path |
-| **Multi-tenancy** | `tenants.json` + per-tenant API keys, collection prefixes, quotas |
-| **Automated backups** | Periodic tar.gz + optional S3/GCS upload |
-| **Point-in-time recovery** | `manifests.jsonl` history + `POST /v1/admin/restore` |
-| **Structured logging + OTel** | JSON logs on every search; OTLP export when `--otel` enabled |
-| **Kubernetes** | Helm StatefulSet + PVC + Ingress + Secret-managed API key |
+The 0.3.0 routes are listed above. The full reference, with request fields, defaults and status
+codes, is generated from the route registrations by `scripts/gen_api_docs.py` into
+[`docs/api/rest.md`](docs/api/rest.md); it follows `main`, so it also lists unreleased routes.
 
 ---
 
-## Platform Support
+## Running in production
 
-| Platform | CPU | GPU | TPU | Docker |
-|---|:---:|:---:|:---:|:---:|
-| Linux x86_64 | ✅ | ✅ CUDA 12 | ✅ XLA | ✅ |
-| Linux ARM64 (Graviton) | ✅ | ✅ Jetson | ❌ | ✅ |
-| macOS Apple Silicon | ✅ GCC 16 | ❌ | ❌ | ✅ |
-| Windows (WSL2) | ✅ | ✅ CUDA | ❌ | ✅ |
-
-**Compiler:** GCC 12+ / Clang 15+ · **CUDA:** 12.0+ (sm_70+) · **C++ standard:** C++20
-
----
-
-## Research Foundation
-
-TideVec implements and extends algorithms from peer-reviewed research:
-
-| Algorithm | Reference | Status |
+| Feature | Docker default | Flag / env |
 |---|---|---|
-| TVIndex temporal scoring | Original contribution | EB-1A Criterion 5 |
-| CausalEdge co-location | Original contribution | EB-1A Criterion 5 |
-| DriftBridge (Procrustes) | Drift-Adapter 2025 | Extended |
-| HNSW | Malkov & Yashunin, IEEE TPAMI 2020 | Modified |
-| CAGRA | Ootomo et al., ICDE 2024 | Implemented |
-| RS erasure coding | Plank, FAST 2005 | Implemented |
-| Raft consensus | Ongaro & Ousterhout, ATC 2014 | Implemented |
+| Auth | on (key generated and printed if unset) | `--require-auth`, `TIDEVEC_API_KEY`, `TIDEVEC_REQUIRE_AUTH=0` to disable |
+| Ultra-durable stack | on | `--ultra-durable`, `TIDEVEC_ULTRA_DURABLE=0` |
+| Segment store | on | `--segment-store`, `TIDEVEC_SEGMENT_STORE=0` |
+| Backups (local, S3, GCS) | off | `--backup --backup-s3 s3://... --backup-gcs gs://...`, `TIDEVEC_BACKUP=1`, `TIDEVEC_BACKUP_S3`, `TIDEVEC_BACKUP_GCS`; snapshots go to the `/backups` volume (S3/GCS upload needs the `aws`/`gsutil` CLIs, not in the image) |
+| Rate limit | 100 req/s per client | `--rate-limit N`, `TIDEVEC_RATE_LIMIT` |
+| OTel export | off | `--otel --otel-endpoint URL`, `TIDEVEC_OTEL_ENDPOINT` (JSON log lines; OTLP span export is experimental) |
+| TLS | off | `--tls-cert/--tls-key` (build with `-DTIDEVEC_TLS=ON`; the Docker images have it: `TIDEVEC_TLS_CERT`, `TIDEVEC_TLS_KEY`), or a reverse proxy such as the compose `tls` profile (nginx) |
+| Multi-tenancy | off | `--multi-tenant`, `TIDEVEC_MULTI_TENANT=1` + `tenants.json` (per-tenant keys, prefixes, quotas); not an isolation boundary, see [docs](docs/operations/auth.md) |
+| DriftBridge allowlist | none | `--reembed-allow h1,h2`, `--reembed-allow-private`, `TIDEVEC_REEMBED_ALLOW` |
+| Cluster mode (experimental) | off | `--node-id`, `--raft-peers`, `TIDEVEC_NODE_ID`, `TIDEVEC_RAFT_PEERS`, `TIDEVEC_CLUSTER_SECRET` |
 
-**Paper in preparation:** *"TideVec: Temporally-Aware Causal Vector Retrieval for Agentic AI"*
-Target: VLDB 2027 / IEEE TKDE
+The data directory holds `registry.json`, a WAL per shard, segments, `tenants.json` and (in cluster
+mode) `raft/`. Keep backups outside it: snapshots archive the whole data directory. **Changing the API
+key does not revoke the old one** in 0.3.0, because the first key is stored in `tenants.json`; edit
+that file to revoke it ([details](docs/operations/auth.md)).
 
----
-
-## Competitive Differentiation
-
-| Feature | TideVec | Qdrant | Milvus | Weaviate | Pinecone |
-|---|:---:|:---:|:---:|:---:|:---:|
-| Temporal decay scoring | ✅ TVIndex | ❌ (hard timestamp filter only) | ❌ | ❌ | ❌ |
-| Native causal graph | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Contradiction detection | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Zero-downtime model migration | ✅ DriftBridge | ❌ | ❌ | ❌ | ❌ |
-| Per-query OTel trace | ✅ | ❌ | ❌ | ❌ | ❌ |
-| RS erasure coding (11 nines) | ✅ | ❌ | ❌ | ❌ | partial |
-| Raft consensus | ✅ | ❌ | ✅ | ❌ | proprietary |
-| GPU CAGRA kernels | ✅ | ❌ | ✅ | ❌ | proprietary |
-| C++20 header-only core | ✅ | ❌ Rust | partial | ❌ Go | ❌ |
-| Apache 2.0 open source | ✅ | ✅ | ✅ | ❌ | ❌ |
+A Helm chart (`deploy/helm/tidevec`, StatefulSet + PVC + Secret) and a compose file with
+Prometheus/Grafana/Jaeger (`docker compose -f docker/docker-compose.yml --profile monitoring up`) are
+included. The env variables above apply to the CPU image; the GPU and TPU images start the server
+with fixed flags. Operations guide: [`docs/operations/`](docs/operations/deployment.md).
 
 ---
 
-## File Structure
+## Architecture
 
 ```
-tidevec/
-├── include/tidevec/
-│   ├── core/           cortex_vector.hpp, temporal_scorer.hpp, metrics.hpp
-│   ├── index/          tv_index.hpp (HNSW+temporal), flat_index.hpp
-│   ├── graph/          causal_graph.hpp (BFS, typed edges)
-│   ├── cluster/        durable_collection.hpp, shard_router.hpp,
-│   │                   replica_set.hpp, ultra_durable_collection.hpp
-│   ├── consensus/      raft.hpp (leader election, log replication)
-│   ├── erasure/        reed_solomon.hpp (GF(256), RS encode/decode)
-│   ├── health/         health_monitor.hpp (scrub, repair, heartbeat)
-│   ├── accelerator/    device.hpp, cpu_engine.hpp, gpu_engine.hpp,
-│   │                   tpu_engine.hpp, dispatcher.hpp,
-│   │                   accelerated_collection.hpp
-│   ├── storage/        wal.hpp (group commit), segment_store.hpp
-│   ├── quantization/   product_quantizer.hpp (PQ, ADC)
-│   ├── observability/  retrieval_trace.hpp (OTel)
-│   └── api/            rest_server.hpp, json_serializers.hpp,
-│                       collection_registry.hpp
-├── src/
-│   ├── api/            server_main.cpp (tidevec-server binary)
-│   └── accelerator/    gpu_kernels.cu (CUDA), tpu_kernels.cc (XLA)
-├── sdk/
-│   ├── python/         tidevec-py (PyPI)
-│   ├── go/             tidevec-go
-│   └── java/           tidevec-java (Maven)
-├── proto/              tidevec.proto (gRPC source of truth)
-├── tests/
-│   ├── unit/           test_tidevec.cpp, test_scale_durability.cpp,
-│   │                   test_accelerator.cpp, test_eleven_nines.cpp
-│   ├── integration/    test_api.cpp
-│   └── benchmarks/     bench_billion_scale.cpp
-├── benchmarks/
-│   └── temporal_vs_qdrant/   TideVec soft-decay vs Qdrant timestamp filter
-│       ├── run_benchmark.py  (stdlib-only, 64-doc refund-policy corpus)
-│       └── results/          benchmark_results.json
-├── docker/
-│   ├── cpu/Dockerfile  Ubuntu 24.04, ~40MB final image
-│   ├── gpu/Dockerfile  CUDA 12.3, multi-stage
-│   └── tpu/Dockerfile  JAX + XLA runtime
-└── .github/workflows/  ci.yml (build + test + Docker + PyPI)
+            Python (embedded: tidevec_native)          REST clients (Python, Go, Java, C++)
+                          │                                         │
+                          │                          tidevec-server: REST :6399 (cpp-httplib)
+                          │                            auth · rate limit · tenants · OTel
+                          │                            [experimental] Raft over HTTP between servers
+                          ▼                                         ▼
+              ┌───────────────────────── CollectionRegistry ─────────────────────────┐
+              │  DurableCollection (default) │ UltraDurableCollection │ Accelerated   │
+              │   ShardRouter → per-shard WAL → Collection                            │
+              │      TVIndex (HNSW + recency + supersession)  ·  CausalGraph (edges)  │
+              │   SegmentStore (disk vectors, PQ rescoring) · RS(10,4) · HealthMonitor │
+              └───────────────────────────────────────────────────────────────────────┘
+                     DriftBridge (shadow re-embedding) · Backups / PITR · RetrievalTrace
+```
+
+---
+
+## Tests
+
+| Suite | Covers |
+|---|---|
+| `tidevec_tests` | TVIndex recall vs. exact search, filters, upserts, tombstone compaction, outliers, temporal math, supersession, causal graph |
+| `tidevec_scale_tests` | WAL crash recovery, sharding, replica sets, PQ encode/ADC, concurrent writes |
+| `tidevec_api_tests` | every REST endpoint, delete-by-filter, supersession, error codes, re-embed URL allowlist |
+| `tidevec_accel_tests` | AVX2 kernels, IVF, dispatcher, GPU/TPU fallbacks |
+| `tidevec_eleven_nines_tests` | GF(256), RS encode/decode, Raft election/replication/persistence, health monitor, durability model |
+| Python (`sdk/python/tests`) | embedded and server modes, integrations, agent memory, DriftBridge, 3-process Raft cluster |
+| Go / Java SDKs | JSON encoding, plus live-server round trips: supersession, filter delete, edges |
+| Release smoke test (`scripts/release_smoke_test.py`) | installed package or running server: version, supersession, dimension validation |
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+for t in build/tidevec_*tests; do $t || break; done
+cd sdk/python && pytest                     # uses build/tidevec-server
+```
+
+CI runs all of the above on Ubuntu 22.04/24.04, Python 3.9-3.13, builds embedded wheels for
+Linux x86_64, Linux arm64 and macOS arm64, and builds the docs with `mkdocs build --strict`. Pushing a
+`v*` tag runs [`release.yml`](.github/workflows/release.yml), which also installs the built wheels on
+each platform and smoke-tests the Docker image before publishing.
+
+---
+
+## Platform support
+
+| Platform | Server | Embedded wheel | Notes |
+|---|:---:|:---:|---|
+| Linux x86_64 | ✅ CI | ✅ | Docker CPU image amd64 + arm64 |
+| Linux arm64 | ✅ (Docker) | ✅ | |
+| macOS arm64 | not built in CI | ✅ | the wheel job compiles the engine headers |
+| Windows | via WSL2 / Docker | ❌ | storage layer uses POSIX APIs |
+| NVIDIA GPU | optional build | ❌ | not validated on hardware in CI |
+
+Compiler: GCC 12+ / Clang 15+, C++20.
+
+---
+
+## Scale projections (not measured)
+
+The figures below are design targets derived from published results for the underlying algorithms,
+not TideVec measurements. They are here to show the intended scaling path, not as benchmarks.
+
+| Path | Target |
+|---|---|
+| PQ (96 subspaces), 1B × 768-dim | ~96 GB of codes vs. 3.1 TB raw float32 |
+| GPU graph search (CAGRA design) | order-of-magnitude higher batch QPS than CPU HNSW, per the CAGRA paper |
+| TPU exact matmul | exact recall for batch workloads |
+
+---
+
+## How TideVec compares
+
+Capabilities as documented by each project in 2025; check their current docs before relying on this.
+
+| | TideVec | Qdrant | Milvus | Weaviate | Pinecone |
+|---|---|---|---|---|---|
+| Recency in ranking | in-search blend | decay formulas over prefetched candidates | decay rankers | — | — |
+| Automatic version supersession | ✅ | — | — | — | — |
+| Typed edges between records | ✅ | — | — | cross-references | — |
+| Embedded / in-process mode | ✅ (Python) | local mode (Python client) | Milvus Lite | embedded (experimental) | — |
+| Production distributed clustering | experimental (full replicas) | ✅ | ✅ | ✅ | ✅ (managed) |
+| Managed cloud | not yet | ✅ | ✅ (Zilliz) | ✅ | ✅ |
+| GPU | CUDA path, unvalidated | GPU indexing | ✅ (cuVS, incl. CAGRA) | — | n/a |
+| License | Apache-2.0 | Apache-2.0 | Apache-2.0 | BSD-3-Clause | proprietary |
+
+TideVec is young: the established engines are far ahead on scale, operations and ecosystem. Its focus
+is narrower: retrieval over content that changes, and memory for agents.
+
+---
+
+## Research foundation
+
+| Component | Reference | Status |
+|---|---|---|
+| TVIndex temporal scoring inside HNSW | Original contribution | Implemented |
+| Write-time supersession linking | Original contribution | Implemented |
+| CausalEdge co-located typed graph | Original contribution | Implemented |
+| HNSW | Malkov & Yashunin, IEEE TPAMI 2020 | Modified (temporal scoring) |
+| CAGRA search design | Ootomo et al., ICDE 2024 | Independent CUDA implementation; not validated on hardware |
+| Reed-Solomon erasure coding | Plank, FAST 2005 | Implemented |
+| Raft consensus | Ongaro & Ousterhout, USENIX ATC 2014 | Implemented; snapshots and membership changes in progress |
+
+A paper on temporally-aware retrieval for agents is in preparation.
+
+---
+
+## Repository layout
+
+```
+include/tidevec/
+  core/           cortex_vector, temporal_scorer, metrics, supersession, collection
+  index/          tv_index (HNSW + recency), flat_index
+  graph/          causal_graph
+  cluster/        durable_collection, shard_router, replica_set, ultra_durable_collection
+  consensus/      raft (log, election, persistence), raft_http (HTTP transport)
+  erasure/        reed_solomon
+  health/         health_monitor
+  storage/        wal, segment_store
+  drift/          drift_bridge, drift_http
+  accelerator/    cpu/gpu/tpu engines, dispatcher
+  api/            rest_server, collection_registry, server_security, json_serializers
+src/              server_main.cpp, CUDA and XLA kernels
+sdk/              python, python-embedded (pybind11), go, java, cpp
+examples/         quickstart, LangChain, LlamaIndex, agent memory / MCP, DriftBridge, Colab notebook
+benchmarks/       temporal_real_data (Wikipedia revisions), temporal_vs_qdrant (synthetic); others in progress
+tests/            unit, integration
+docker/ deploy/   images, compose, Helm chart
+docs/             MkDocs site (mkdocs.yml at the root); docs/api/rest.md is generated
+scripts/          gen_api_docs.py, check_release_versions.py, release_smoke_test.py, sync_embedded_headers.sh
 ```
 
 ---
 
 ## Roadmap
 
-- [x] TVIndex (temporal HNSW) + CausalEdge graph
-- [x] WAL + ShardRouter + 3-way ReplicaSet
-- [x] GPU CAGRA kernels + TPU XLA matmul
-- [x] REST API + gRPC + Python/Go/Java/C++ SDKs
-- [x] RS(10,4) erasure coding (11-nines durability)
-- [x] Raft consensus (9-nines availability)
-- [x] Health monitor (scrub + repair + heartbeat)
-- [x] WAL group commit (1000 writes/fsync)
-- [x] Docker (CPU + GPU + TPU) + docker-compose
-- [x] GitHub Actions CI/CD + PyPI auto-publish
-- [x] DriftBridge zero-downtime embedding migration
-- [x] AgentContext TTL lifecycle policies
-- [x] Helm chart for Kubernetes (`deploy/helm/tidevec`)
-- [x] `tidevec` PyPI package (auto-publish on `v*` tags)
-- [x] tidevec.com website (Vercel)
-- [ ] Distributed Raft over gRPC (v0.3)
-- [ ] VLDB 2027 paper submission (v0.3)
+See [ROADMAP.md](ROADMAP.md): phased plan with exit criteria covering filters and payload indexes,
+hybrid search, multi-host sharding, Raft hardening, ecosystem integrations, distribution and a
+managed service.
 
 ---
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
-
----
+Apache 2.0, see [LICENSE](LICENSE).
 
 <div align="center">
 
-Built by [Ashish Verma](https://github.com/ashishodu2023) — Senior Data Engineer, PayPal · MS Data Science, ODU 2025
-
-*Part of the [Cortex Platform](https://getcortexops.com): CortexOps (observability) + TideVec (vector storage)*
+Built by [Ashish Verma](https://github.com/ashishodu2023) · Part of the [Cortex Platform](https://getcortexops.com)
 
 **[tidevec.com](https://tidevec.com) · [GitHub](https://github.com/ashishodu2023/TideVec) · [PyPI](https://pypi.org/project/tidevec/)**
 

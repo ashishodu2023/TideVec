@@ -1,0 +1,52 @@
+# Smithery listing for the TideVec memory MCP server (stdio).
+# Point Smithery's "base directory" at packaging/mcp (or copy this file
+# and the Dockerfile to the repository root).
+runtime: container
+build:
+  dockerfile: Dockerfile
+  dockerBuildPath: .
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      tidevecUrl:
+        type: string
+        title: TideVec server
+        description: host:port of a tidevec-server. Leave empty for an embedded database (stored inside the container, so it is lost when the container stops).
+        default: ""
+      tidevecApiKey:
+        type: string
+        title: API key
+        description: X-Api-Key for the tidevec-server.
+        default: ""
+      collection:
+        type: string
+        title: Collection
+        default: agent_memory
+      embedder:
+        type: string
+        title: Embedder
+        enum: [auto, hashing, openai, sentence-transformers]
+        default: auto
+      openaiApiKey:
+        type: string
+        title: OpenAI API key
+        description: Used for embeddings when embedder is openai (or auto without sentence-transformers).
+        default: ""
+  commandFunction: |-
+    (config) => {
+      const args = ["--collection", config.collection || "agent_memory",
+                    "--embedder", config.embedder || "auto"];
+      if (config.tidevecUrl) args.push("--url", config.tidevecUrl);
+      const env = {};
+      if (config.tidevecApiKey) env.TIDEVEC_API_KEY = config.tidevecApiKey;
+      if (config.openaiApiKey) env.OPENAI_API_KEY = config.openaiApiKey;
+      return { command: "tidevec-mcp", args, env };
+    }
+  exampleConfig:
+    tidevecUrl: "tidevec.example.com:6399"
+    tidevecApiKey: "tv_example"
+    collection: agent_memory
+    embedder: openai
+    openaiApiKey: "sk-example"
