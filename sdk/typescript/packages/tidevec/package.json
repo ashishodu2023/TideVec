@@ -1,0 +1,60 @@
+{
+  "name": "tidevec",
+  "version": "0.3.0",
+  "description": "TypeScript client for TideVec, the vector database that knows when facts change",
+  "license": "Apache-2.0",
+  "author": "Ashish Verma <contact@tidevec.com>",
+  "homepage": "https://tidevec.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashishodu2023/TideVec.git",
+    "directory": "sdk/typescript/packages/tidevec"
+  },
+  "bugs": "https://github.com/ashishodu2023/TideVec/issues",
+  "keywords": [
+    "vector-database",
+    "embeddings",
+    "rag",
+    "agent-memory",
+    "temporal",
+    "supersession",
+    "tidevec"
+  ],
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node scripts/write-cjs-package.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.0"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "name": "n8n-nodes-tidevec",
+  "version": "0.3.0",
+  "description": "n8n community node for TideVec: store and search vectors that know when facts change",
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Ashish Verma",
+    "email": "contact@tidevec.com"
+  },
+  "homepage": "https://tidevec.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashishodu2023/TideVec.git",
+    "directory": "sdk/typescript/packages/n8n-nodes-tidevec"
+  },
+  "keywords": [
+    "n8n-community-node-package",
+    "tidevec",
+    "vector-database",
+    "rag",
+    "agent-memory"
+  ],
+  "main": "index.js",
+  "files": [
+    "dist",
+    "index.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json && cp nodes/TideVec/tidevec.svg dist/nodes/TideVec/",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "strict": true,
+    "credentials": [
+      "dist/credentials/TideVecApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/TideVec/TideVec.node.js"
+    ]
+  },
+  "dependencies": {
+    "tidevec": "^0.3.0"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "n8n-workflow": "^2.16.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.0"
+  }
+}

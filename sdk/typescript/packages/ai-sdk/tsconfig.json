@@ -1,0 +1,8 @@
+{
+  "extends": "../tidevec/tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/esm",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
