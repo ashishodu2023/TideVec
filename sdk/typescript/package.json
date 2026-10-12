@@ -1,0 +1,19 @@
+{
+  "name": "tidevec-typescript",
+  "private": true,
+  "description": "TideVec JavaScript/TypeScript packages (npm workspaces)",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/tidevec",
+    "packages/ai-sdk",
+    "packages/n8n-nodes-tidevec"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

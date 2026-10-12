@@ -1,0 +1,67 @@
+{
+  "name": "@tidevec/ai-sdk",
+  "version": "0.3.0",
+  "description": "Vercel AI SDK tools and RAG middleware for TideVec: agent memory that knows when facts change",
+  "license": "Apache-2.0",
+  "author": "Ashish Verma <contact@tidevec.com>",
+  "homepage": "https://tidevec.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ashishodu2023/TideVec.git",
+    "directory": "sdk/typescript/packages/ai-sdk"
+  },
+  "keywords": [
+    "ai",
+    "vercel-ai-sdk",
+    "agent-memory",
+    "rag",
+    "tools",
+    "tidevec"
+  ],
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node ../tidevec/scripts/write-cjs-package.mjs dist/cjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "tidevec": "^0.3.0"
+  },
+  "peerDependencies": {
+    "ai": ">=5.0.0",
+    "zod": "^3.25.76 || ^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "ai": "^7.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.0",
+    "zod": "^4.1.8"
+  }
+}

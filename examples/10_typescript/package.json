@@ -1,0 +1,16 @@
+{
+  "name": "tidevec-examples-typescript",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "quickstart": "node quickstart.mjs",
+    "agent": "node ai_sdk_agent.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.0",
+    "@tidevec/ai-sdk": "^0.3.0",
+    "ai": "^7.0.0",
+    "tidevec": "^0.3.0",
+    "zod": "^4.1.8"
+  }
+}
