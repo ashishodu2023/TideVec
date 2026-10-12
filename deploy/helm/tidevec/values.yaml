@@ -1,18 +1,33 @@
-# Default values for TideVec
+# Default values for TideVec.
+
+# One replica = one independent database. More than one requires the
+# experimental Raft cluster mode (cluster.enabled=true).
 replicaCount: 1
 
 image:
   repository: averm004/tidevec
-  tag: latest
+  # Defaults to the chart's appVersion. Variants: "<version>-gpu", "<version>-tpu".
+  tag: ""
   pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
 
 service:
   type: ClusterIP
   port: 6399
+  annotations: {}
 
 ingress:
   enabled: false
   className: nginx
+  annotations: {}
   tls: []
   hosts:
     - host: tidevec.local
@@ -22,44 +37,123 @@ ingress:
 
 resources:
   requests:
-    cpu: "2"
-    memory: 4Gi
+    cpu: "1"
+    memory: 2Gi
   limits:
-    cpu: "8"
-    memory: 16Gi
+    memory: 8Gi
 
 persistence:
   enabled: true
-  size: 100Gi
+  size: 20Gi
   storageClass: ""
   accessMode: ReadWriteOnce
+  annotations: {}
 
 config:
-  threads: 8
-  device: auto
+  threads: 4
+  device: auto                # auto | cpu | gpu | tpu (gpu/tpu need the matching image)
   requireAuth: true
   ultraDurable: true
   segmentStore: true
-  backup: true
-  backupIntervalHours: 6
-  rateLimitRps: 100
-  otelEnabled: true
-  otelEndpoint: ""
+  multiTenant: false
+  rateLimitRps: 100           # per-client requests/second; 0 disables
+  otelEndpoint: ""            # OTLP/HTTP endpoint; enables tracing when set
+  # Hosts the drift re-embedding webhook may call (comma-separated).
+  reembedAllow: ""
+  # debug | info: one log line per request; warn | error: startup output,
+  # warnings and errors only.
+  logLevel: info
 
-secrets:
-  # Set via --set secrets.apiKey=yourkey or external secret
-  apiKey: ""
+# Native TLS: the server itself serves HTTPS with the certificate in a
+# kubernetes.io/tls Secret (keys tls.crt / tls.key, e.g. from cert-manager).
+# Probes switch to HTTPS. Not supported with cluster.enabled (Raft peers
+# talk plain HTTP). With an Ingress in front, tell it the backend speaks
+# HTTPS (ingress-nginx: nginx.ingress.kubernetes.io/backend-protocol: HTTPS).
+tls:
+  enabled: false
+  secretName: ""
 
 backup:
+  enabled: true
+  intervalHours: 6
+  # Snapshots tar up /data, so they are written to a separate volume.
+  persistence:
+    enabled: false            # false = emptyDir (lost with the pod; use s3Uri/gcsUri)
+    size: 20Gi
+    storageClass: ""
+  # Uploads need the aws / gsutil CLI in the image (not in the default image).
   s3Uri: ""
   gcsUri: ""
 
+secrets:
+  # API key for X-Api-Key auth. Empty = generate one on install and keep it
+  # across upgrades. Ignored when existingSecret is set.
+  apiKey: ""
+  # Use a Secret you manage (e.g. External Secrets / Sealed Secrets).
+  existingSecret: ""
+  existingSecretKey: api-key
+  # Key in existingSecret holding the Raft secret (cluster mode only).
+  existingSecretClusterKey: cluster-secret
+
+# EXPERIMENTAL Raft replication. Requires replicaCount >= 3 (odd) and
+# Kubernetes >= 1.28 (pod-index label). Writes must go to the leader;
+# followers answer 421 with the leader's in-cluster URL.
+cluster:
+  enabled: false
+  # Shared secret for Raft RPCs. Empty = generated and kept across upgrades
+  # (or read from secrets.existingSecretClusterKey).
+  secret: ""
+
+probes:
+  startup:
+    enabled: true
+    periodSeconds: 5
+    failureThreshold: 120     # up to 10 minutes for WAL/segment recovery
+  liveness:
+    periodSeconds: 15
+    timeoutSeconds: 5
+    failureThreshold: 4
+  readiness:
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+terminationGracePeriodSeconds: 60
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+extraEnv: []
+#  - name: TIDEVEC_LOG_LEVEL
+#    value: debug
+
 monitoring:
-  prometheus:
+  # Prometheus Operator ServiceMonitor scraping /metrics (no auth needed).
+  serviceMonitor:
     enabled: false
-  jaeger:
-    enabled: false
+    interval: 30s
+    labels: {}
+    # With tls.enabled: Prometheus TLS settings for the scrape (e.g. caFile,
+    # serverName). Empty = skip certificate verification.
+    tlsConfig: {}
 
 nodeSelector: {}
 tolerations: []
 affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
