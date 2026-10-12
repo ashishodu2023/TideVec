@@ -1,9 +1,6 @@
-cd ~/tidevec
-
-cat > .gitignore << 'EOF'
 # Build artifacts
 build/
-build_check/
+build_*/
 cmake-build-*/
 *.o
 *.obj
@@ -31,6 +28,15 @@ __pycache__/
 dist/
 .eggs/
 *.whl
+.venv/
+.devenv/
+.uv-cache/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Benchmark downloads
+benchmarks/**/data/
 
 # Go
 sdk/go/vendor/
@@ -53,8 +59,9 @@ website/dist/
 # OS
 .DS_Store
 Thumbs.db
-EOF
-
-# Verify it landed correctly
-cat .gitignore
-wc -l .gitignore
+sdk/python-embedded/include/
+.venvs/
+build-*/
+site/
+.chaos-out/
+marketing/
